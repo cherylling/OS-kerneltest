@@ -1,0 +1,100 @@
+#!/usr/bin/expect -f 
+# Copyright 2004, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+# Test stepping into and continuing on from a function in
+# a shared library (PR gdb/1555, was PR shlib/1280, shlib/1237).
+# Tested on ppc-yellowdog-linux (Yellow Dog Linux 3.0 3.2.2-2a)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+#if {[skip_shlib_tests]} {
+#    return 0
+#}
+
+set testfile gdb1555-main
+set libfile gdb1555
+set srcfile ${testfile}.c
+set binfile ${testfile}
+
+set libsrc "${libfile}.c"
+set libobj "${libfile}.so"
+set execsrc "${srcfile}"
+
+#remote_exec build "rm -f ${binfile}"
+
+# get the value of gcc_compiled
+#if [get_compiler_info ${binfile}] {
+#    return -1
+#}
+
+#if { [gdb_compile_shlib $libsrc $libobj {debug}] != ""
+#     || [gdb_compile $execsrc ${binfile} executable \
+#	     [list debug shlib=${libobj}]] != "" } {
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+#gdb_load_shlibs $libobj
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+
+if ![runto_main] then {
+    send_user "Can't run to main"
+    exit -1
+}
+
+# PR/1555 (was shlib 1280)
+set name "Step into shared lib function"
+gdb_test "s" "hithere2 \\(\\) at.*${libfile}.c:\[0-9\]+.*\[0-9\]+.*a = 21;.*$gdb_prompt"  
+
+# PR/1555 (was shlib 1237)
+set name "Next while in a shared lib function"
+gdb_test "n" "\[0-9\]+.*return a;.*$gdb_prompt" 
+
+exit $GRET
+
+interact

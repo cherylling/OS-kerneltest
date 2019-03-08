@@ -1,0 +1,124 @@
+#!/usr/bin/expect -f
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "hook-stop-continue"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if { [prepare_for_testing ${testfile}.exp "${testfile}" "${testfile}.c" {debug nowarnings}] } {
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+#if ![runto_main] then {
+#    perror "Couldn't run to main"
+#}
+
+gdb_test "b main" ""
+gdb_test "c" ""
+
+set bp_location [gdb_get_line_number "set breakpoint here"]
+
+gdb_test "break $bp_location" \
+    "Breakpoint.*at.* file .*$srcfile, line $bp_location\\." \
+    "breakpoint line number"
+
+gdb_test "print \$do_continue = 1" "1"
+
+send "define hook-stop\n"
+expect {
+  -re "Type commands for definition of \"hook-stop\".\r\nEnd with a line saying just \"end\".\r\n>$"\
+          {send "if \$do_continue\nset \$do_continue = 0\ncontinue\nend\nend\n"
+           expect {
+             -re "$gdb_prompt"\
+                       {pass "define hook-stop command"}
+             timeout {fail "(timeout) define hook-stop command"}
+           }
+          }
+  timeout {fail "(timeout) define hook-stop command"}
+}
+
+gdb_test "next" "Breakpoint.*funbreak \\(i=5\\) at .*:$bp_location\r\n$bp_location.*set breakpoint here \\*/" \
+    "next triggering hook-stop"
+
+gdb_test "next" "i = i \\+ 10;" "next no hook-stop"
+
+gdb_exit
+exit $GRET
+
+interact

@@ -1,0 +1,168 @@
+#!/usr/bin/expect -f
+#   Copyright 2011-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Justin Lebar. (justin.lebar@gmail.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "skip"
+set srcfile skip.c
+set srcfile1 skip1.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL " "$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if { [prepare_for_testing skip.exp "skip" \
+#                          {skip.c skip1.c } \
+#                          {debug nowarnings}] } {
+#    return -1
+#}
+
+
+#
+# Right after we start gdb, there's no default file or function to skip.
+#
+gdb_test "skip file" "No default file now." "skip file (no default file)"
+gdb_test "skip function" "No default function now."
+gdb_test "skip" "No default function now." "skip (no default function)"
+
+#if ![runto_main] { fail "skip tests suppressed" }
+
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+gdb_test "file $testfile" "Are you sure you want to change the file\\? \\(y or n\\)"
+gdb_test "y" "Reading symbols from.*$gdb_prompt"
+
+#
+# Right now, we have an outstanding skiplist entry on both source
+# files, so when we step into the first line in main(), we should step
+# right over it and go to the second line of main().
+#
+
+#if ![runto_main] { fail "skip tests suppressed" }
+gdb_test "b main" ""
+gdb_test "c" ""
+gdb_test "skip file" "File .*$srcfile will be skipped when stepping\." "skip file ($srcfile)"
+gdb_test "skip" "Function main at .* will be skipped when stepping\." "skip (main)"
+gdb_test "skip file skip1.c" "File .*$srcfile1 will be skipped when stepping\."
+gdb_test "skip function baz" "Function baz at .* will be skipped when stepping\."
+gdb_test "skip delete 1"
+gdb_test "skip disable 3"
+gdb_test "skip enable 3"
+
+gdb_test "step" "foo \\(\\) at.*" "step after enable 3 (1)"
+gdb_test "step" ".*" "step after enable 3 (2)"; # Return from foo()
+gdb_test "step" "main \\(\\) at.*" "step after enable 3 (3)"
+
+gdb_test "skip disable"
+gdb_test "info skip" \
+  "Num\\s+Type\\s+Enb\\s+Address\\s+What\\s*
+2\\s+function\\s+n\\s+0x\[0-9a-f\]+ main at .*$srcfile:\[0-9\]+\\s*
+3\\s+file\\s+n\\s+.*$srcfile1\\s*
+4\\s+function\\s+n\\s+0x\[0-9a-f\]+ baz at .*$srcfile1:\[0-9\]+\\s*" \
+  "info skip after disabling all"
+
+gdb_test "skip enable"
+gdb_test "info skip" \
+  "Num\\s+Type\\s+Enb\\s+Address\\s+What\\s*
+2\\s+function\\s+y\\s+0x\[0-9a-f\]+ main at .*$srcfile:\[0-9\]+\\s*
+3\\s+file\\s+y\\s+.*$srcfile1\\s*
+4\\s+function\\s+y\\s+0x\[0-9a-f\]+ baz at .*$srcfile1:\[0-9\]+\\s*" \
+  "info skip after enabling all"
+
+gdb_test "skip disable 4 2-3"
+gdb_test "info skip" \
+  "Num\\s+Type\\s+Enb\\s+Address\\s+What\\s*
+2\\s+function\\s+n\\s+0x\[0-9a-f\]+ main at .*$srcfile:\[0-9\]+\\s*
+3\\s+file\\s+n\\s+.*$srcfile1\\s*
+4\\s+function\\s+n\\s+0x\[0-9a-f\]+ baz at .*$srcfile1:\[0-9\]+\\s*" \
+  "info skip after disabling 4 2-3"
+
+gdb_test "skip enable 2-3"
+gdb_test "info skip" \
+  "Num\\s+Type\\s+Enb\\s+Address\\s+What\\s*
+2\\s+function\\s+y\\s+0x\[0-9a-f\]+ main at .*$srcfile:\[0-9\]+\\s*
+3\\s+file\\s+y\\s+.*$srcfile1\\s*
+4\\s+function\\s+n\\s+0x\[0-9a-f\]+ baz at .*$srcfile1:\[0-9\]+\\s*" \
+  "info skip after enabling 2-3"
+
+gdb_test "info skip 2-3" \
+  "Num\\s+Type\\s+Enb\\s+Address\\s+What\\s*
+2\\s+function\\s+y\\s+0x\[0-9a-f\]+ main at .*$srcfile:\[0-9\]+\\s*
+3\\s+file\\s+y\\s+.*$srcfile1\\s*" \
+  "info skip 2-3"
+
+gdb_test "skip delete 2 3"
+gdb_test "info skip" \
+  "4\\s+function\\s+n\\s+0x\[0-9a-f\]+ baz at .*$srcfile1:\[0-9\]+\\s*" \
+  "info skip after deleting 2 3"
+
+gdb_test "skip delete"
+gdb_test "info skip" "Not skipping any files or functions\." \
+  "info skip after deleting all"
+gdb_exit
+exit $GRET
+
+interact

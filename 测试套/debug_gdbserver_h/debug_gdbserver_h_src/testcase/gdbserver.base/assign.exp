@@ -1,0 +1,214 @@
+#!/usr/bin/expect -f
+# Copyright 1998-1999, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Elena Zannoni (ezannoni@cygnus.com)
+
+# This file is part of the gdb testsuite
+#
+# tests for all the assignemnt operators
+# with mixed types and with int type variables
+# 
+
+#
+# test running programs
+#
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "assign"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set testfile "all-types"
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug nowarnings}] != "" } {
+#     untested assign.exp
+#     return -1
+#    }
+
+
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+
+#
+# set it up at a breakpoint so we can play with the variable values
+#
+
+gdb_test "b main" "reakpoint 1 at .*: file all-types.c, line 31.*$gdb_prompt"
+gdb_test "c" "reakpoint 1, main \\(\\) at all-types.c:31.*dummy\\(\\);.*$gdb_prompt"
+#if ![runto_main] then {
+#    perror "couldn't run to breakpoint"
+#    continue
+#}
+
+gdb_test "next" "return 0;" "continuing after dummy()"
+
+gdb_test "print v_int=57" " = 57.*$gdb_prompt" 
+gdb_test "print v_int" " = 57" "v_int=57"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6"
+
+gdb_test "print v_int+=57" " = 63.*$gdb_prompt"
+	gdb_test "print v_int" " = 63" "v_int+=57"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (2)"
+
+gdb_test "print v_int-=57" " = -51.*$gdb_prompt" 
+	gdb_test "print v_int" " = -51" "v_int-=57"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (3)"
+
+gdb_test "print v_int*=5" " = 30.*$gdb_prompt" 
+	gdb_test "print v_int" " = 30" "v_int*=5"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (4)"
+
+gdb_test "print v_int/=4" " = 1.*$gdb_prompt"
+	gdb_test "print v_int" " = 1" "v_int/=4"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (5)"
+
+gdb_test "print v_int%=4" " = 2.*$gdb_prompt" 
+    gdb_test "print v_int" " = 2" "v_int%=4"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (6)"
+
+gdb_test "print v_int+=v_char" " = 71.*$gdb_prompt" 
+	gdb_test "print v_int" " = 71" "v_int+=char"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (7)"
+
+gdb_test "print v_int+=v_signed_char" " = 72.*$gdb_prompt" 
+	gdb_test "print v_int" " = 72" "v_int+=signed_char"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (8)"
+
+gdb_test "print v_int+=v_unsigned_char" " = 73.*$gdb_prompt" 
+	gdb_test "print v_int" " = 73" "v_int+=unsigned_char"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (9)"
+
+gdb_test "print v_int+=v_short" " = 9.*$gdb_prompt" 
+	gdb_test "print v_int" " = 9" "v_int+=short"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (10)"
+
+gdb_test "print v_int+=v_signed_short" " = 10.*$gdb_prompt" 
+	gdb_test "print v_int" " = 10" "v_int+=signed_short"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (11)"
+
+gdb_test "print v_int+=v_unsigned_short" " = 11.*$gdb_prompt" 
+	gdb_test "print v_int" " = 11" "v_int=+unsigned_short"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (12)"
+
+gdb_test "print v_int+=v_signed_int" " = 13.*$gdb_prompt" 
+	gdb_test "print v_int" " = 13" "v_int+=signed_int"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (13)"
+
+gdb_test "print v_int+=v_unsigned_int" " = 14.*$gdb_prompt" 
+	gdb_test "print v_int" " = 14" "v_int+=unsigned_int"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (14)"
+
+gdb_test "print v_int+=v_long" " = 15.*$gdb_prompt" 
+	gdb_test "print v_int" " = 15" "v_int+=long"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (15)"
+
+gdb_test "print v_int+=v_signed_long" " = 16.*$gdb_prompt"
+	gdb_test "print v_int" " = 16" "v_int+=signed_long"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (16)"
+
+gdb_test "print v_int+=v_unsigned_long" " = 17.*$gdb_prompt" 
+	gdb_test "print v_int" " = 17" "v_int+=unsigned_long"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (17)"
+
+gdb_test "print v_int+=v_float" " = 106.*$gdb_prompt"
+	gdb_test "print v_int" " = 106" "v_int+=v_float"
+
+gdb_test_no_output "set variable v_int = 6" "set v_int to 6 (18)"
+
+gdb_test "print v_int+=v_double" " = 206.*$gdb_prompt" 
+	gdb_test "print v_int" " = 206" "v_int+=double"
+
+gdb_exit
+exit $GRET
+
+interact

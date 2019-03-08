@@ -1,0 +1,202 @@
+#!/usr/bin/expect -f 
+#######################################################################
+##- @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.
+##- @Suitename: debug_gdbshell_h
+##- @Name: gdbshell_v1r2c00_ret-free-normal_tc018
+##- @Author: l00191161
+##- @Date: 2013-10-17
+##- @Precon: 支持gdbshell
+##- @Brief: gdbshell调试后程序正常退出时资源回收验证
+##- @Detail: 1，起大量多进程多线程程序
+#            2，对每个进程gdbshell 进行调试后的程序不会因为多出一个线程影响程序正常退出。同时退出后资源正确回收
+#            3，查看所有程序经过gdbshell调试并退出后系统资源前后变化
+##- @Expect: 被rtat后的程序不影响其正常退出。前后系统资源几乎不变。
+##- @Level: Level 3
+##- @Auto: True
+##- @Modify:
+#######################################################################*/
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdbshell_test/gdbshell" "$target_prompt"
+global testpid
+global binfile
+set binfile thread_loc
+set testpid 0
+gdb_test "killall $binfile"
+sleep 2
+
+# get free mem
+set FREE_MEM 0
+send "cat /proc/meminfo |grep MemFree |awk '\{print \$2\}' \n"
+expect {
+    -timeout 2
+        -re "(\[0-9\]+)\r\n" {
+            set FREE_MEM $expect_out(1,string)
+        }
+}
+
+send_user "FREE_MEM=$FREE_MEM\n"
+if { $FREE_MEM == 0 } {
+    send_user "********* get FREE_MEM fail \n*********"
+    set GRET [expr $GRET + 1]
+}
+
+
+
+gdb_test "./$binfile &" "$target_prompt"
+sleep 1
+send "ps -ef | grep $binfile |grep -v \"grep $binfile\"|sed -n 1p |awk '\{print \$2\}'\n"
+expect {
+    -timeout 2
+        -re "(\[0-9\]+)\r\n" {
+            set testpid $expect_out(1,string)
+        }
+    timeout {
+        send_user "fail \n"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+send_user "testpid=$testpid \n"
+
+if { $testpid == 0 } {
+     set GRET [expr $GRET + 1]
+     exit $GRET
+}
+
+set target_prompt "/tmp/for_gdbshell_test/gdbshell"
+gdb_test "'$GDB_TOOL_DIR'gdbshell" "$gdb_prompt"
+
+gdb_test "rtat $testpid" "gdbshellagent.*$gdb_prompt"
+
+gdb_test "show help" "help"
+set THREAD_NUM 0
+send "info threads\n"
+expect {
+    -timeout 1
+    -re "thread_loc" {
+        incr THREAD_NUM
+        exp_continue
+    }
+}
+
+gdb_test "show help" "help"
+send "info threads\n"
+expect {
+    -timeout 1
+    -re "gdbshellagent" {
+        incr THREAD_NUM
+        exp_continue
+    }
+}
+
+if { $THREAD_NUM != 7 } {
+    send_user "threads num is $THREAD_NUM mismatch 7 while info threads"
+    set GRET [expr $GRET + 1] 
+}
+
+set bt1 0;
+set bt2 0;
+set bt3 0;
+set bt4 0;
+    
+
+for { set i 1 } { $i < 7 } { incr i } {
+    gdb_test "rtint $i" "Switching to thread $i"
+    gdb_test "info threads" "\\* $i"
+# not case
+
+    gdb_test "rtbt" "$gdb_prompt"
+    gdb_test "show non-stop" "Controlling the inferior in non-stop mode is on."
+    set thread_stauts 0
+    send "info threads\n"
+    expect {
+        -timeout 1
+        -re "\"thread_loc\" \\(running\\)" {
+            incr thread_stauts
+            exp_continue
+        }
+    }
+    
+    send_user "thread_stauts=$thread_stauts\n"
+
+    if { $thread_stauts != 6 } {
+        send_user "the threads is not running after rtbt\n"
+        set GRET [expr $GRET + 1] 
+    }
+
+    gdb_test "rtint $i" "Switching to thread $i"
+    gdb_test "info threads" "\\* $i"
+# not case
+    gdb_test "rtir" "$gdb_prompt"
+
+    gdb_test "show non-stop" "Controlling the inferior in non-stop mode is on."
+    set thread_stauts 0
+    send "info threads\n"
+    expect {
+        -timeout 1
+        -re "\"thread_loc\" \\(running\\)" {
+            incr thread_stauts
+            exp_continue
+        }
+    }
+    
+    send_user "thread_stauts=$thread_stauts\n"
+    if { $thread_stauts != 6 } {
+        send_user "the threads is not running after rtir\n"
+        set GRET [expr $GRET + 1] 
+    }
+}
+ 
+gdb_test "detach" "Detaching from program:.*process $testpid"
+
+gdb_exit
+sleep 110
+# get free mem
+set B_FREE_MEM 0
+send "cat /proc/meminfo |grep MemFree |awk '\{print \$2\}' \n"
+expect {
+    -timeout 2
+        -re "(\[0-9\]+)\r\n" {
+            set B_FREE_MEM $expect_out(1,string)
+        }
+}
+
+send_user "B_FREE_MEM=$B_FREE_MEM\n"
+if { $B_FREE_MEM == 0 } {
+    send_user "********* get FREE_MEM fail after test \n*********"
+    set GRET [expr $GRET + 1]
+}
+
+set B_FREE_MEM [expr $B_FREE_MEM + 65536] 
+
+if { $B_FREE_MEM < $FREE_MEM } {
+    send_user "\n********** the system memfree be litter after test. \n"
+    set GRET [expr $GRET + 1]
+}
+
+exit $GRET
+
+interact

@@ -1,0 +1,197 @@
+#!/usr/bin/expect -f
+# Copyright 2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile valgrind-infcall
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if [is_remote target] {
+    # The test always runs locally.
+#    return 0
+#}
+
+#set srcfile $test.c
+#set executable $test
+#set binfile ${objdir}/${subdir}/${executable}
+#if {[build_executable $test.exp $executable $srcfile {debug}] == -1} {
+#    return -1
+#}
+
+set test "spawn valgrind"
+set cmd "valgrind --vgdb-error=0 $binfile"
+set res [remote_spawn host $cmd];
+if { $res < 0 || $res == "" } {
+#    verbose -log "Spawning $cmd failed."
+#    unsupported $test
+#    return -1
+}
+pass $test
+# Declare GDB now as running.
+set gdb_spawn_id -1
+
+# GDB started by vgdb stops already after the startup is executed, like with
+# non-extended gdbserver.  It is also not correct to run/attach the inferior.
+set use_gdb_stub 1
+
+set test "valgrind started"
+# The trailing '.' differs for different memcheck versions.
+gdb_test_multiple "" $test {
+    -re "Memcheck, a memory error detector\\.?\r\n" {
+	pass $test
+    }
+    -re "valgrind: failed to start tool 'memcheck' for platform '.*': No such file or directory" {
+	unsupported $test
+	return -1
+    }
+    -re "valgrind: wrong ELF executable class" {
+	unsupported $test
+	return -1
+    }
+    -re "command not found" {
+	# The spawn succeeded, but then valgrind was not found - e.g. if
+	# we spawned SSH to a remote system.
+	unsupported $test
+	return -1
+    }
+    -re "valgrind: Bad option.*--vgdb-error=0" {
+	# valgrind is not >= 3.7.0.
+	unsupported $test
+	return -1
+    }
+}
+
+set test "vgdb prompt"
+# The trailing '.' differs for different memcheck versions.
+gdb_test_multiple "" $test {
+    -re "  (target remote | \[^\r\n\]*/vgdb \[^\r\n\]*)\r\n" {
+	set vgdbcmd $expect_out(1,string)
+	pass $test
+    }
+}
+
+# Do not kill valgrind.
+unset gdb_spawn_id
+set board [host_info name]
+unset_board_info fileid
+
+clean_restart $executable
+
+gdb_test "$vgdbcmd" " in \\.?_start .*" "target remote for vgdb"
+
+gdb_test "monitor v.set gdb_output" "valgrind output will go to gdb.*"
+
+set continue_count 1
+set loop 1
+while {$loop && $continue_count < 100} {
+    set test "continue #$continue_count"
+    send "continue\n"
+    expect {
+	-re "Invalid free\\(\\).*: main .*.*$gdb_prompt" {
+	    pass $test
+	    # In Ubuntu 10.04.4 environments 'break' does not work here.
+	    set loop 0
+	}
+	-re "Remote connection closed.*.*$gdb_prompt" {
+	    fail "$test (remote connection closed)"
+	    return -1
+	}
+	-re "The program is not being run\\..*$gdb_prompt" {
+	    fail "$test (valgrind vgdb has terminated)"
+	    return -1
+	}
+	-re ".*$gdb_prompt" {
+	    pass "$test (false warning)"
+	}
+    timeout {
+        fail "timeout $test"
+    }
+    }
+    set continue_count [expr $continue_count + 1]
+}
+
+set test "p gdb_test_infcall ()"
+send "$test\n"
+expect {
+    -re "unhandled instruction bytes.*.*$gdb_prompt" {
+	fail $test
+    }
+    -re "Continuing \\.\\.\\..*\r\n\\\$1 = 2.*$gdb_prompt" {
+	pass $test
+    }
+    timeout {
+        fail "timeout $test"
+    }
+}
+
+gdb_exit
+exit $GRET
+
+interact

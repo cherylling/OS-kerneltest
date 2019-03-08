@@ -1,0 +1,68 @@
+#!/usr/bin/expect -f 
+# Copyright (C) 2011-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This problem is reproducible only when using `gdb/cc-with-index.sh'.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+
+set testfile gdbindex-stabs
+set executable ${testfile}
+set binfile ${executable}
+set srcfile_stabs ${testfile}.c
+set srcfile_dwarf ${testfile}-dwarf.c
+set objfile_stabs ${testfile}.o
+set objfile_dwarf ${testfile}-dwarf.o
+
+#if {[gdb_compile "${srcdir}/${subdir}/${srcfile_stabs}" ${objfile_stabs} object {additional_flags=-gstabs}] != ""
+#    || [gdb_compile "${srcdir}/${subdir}/${srcfile_dwarf}" ${objfile_dwarf} object {additional_flags=-gdwarf-2}] != ""
+#    || [gdb_compile "${objfile_stabs} ${objfile_dwarf}" ${binfile} executable {nodebug}] != ""} {
+#     untested ${testfile}.exp
+#     return -1
+#}
+
+#clean_restart ${executable}
+
+gdb_test "'$GDB_TOOL_DIR'gdb $executable" "$gdb_prompt"
+# FAIL was: No line number known for stabs_function.
+gdb_test "list stabs_function" " marker-here .*"
+exit $GRET
+
+interact

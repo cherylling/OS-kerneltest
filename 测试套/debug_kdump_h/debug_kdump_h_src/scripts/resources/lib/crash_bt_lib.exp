@@ -1,0 +1,85 @@
+#!/usr/bin/expect -f
+
+global GRET;
+set GRET 0;
+global ARGC;
+global target_ip
+global target_prompt
+global target_dir
+global BUFFER
+global CRASHPROMPT
+set CRASHPROMPT "crash"
+global ARCH
+set ARCH "xx"
+set target_ip "x.x.x.x"
+set target_prompt "xx" 
+global CRASH_TOOL_DIR
+set CRASH_TOOL_DIR "xx"
+set targeglobal decimal
+set decimal "\[0-9\]+"
+
+proc crash_test {args} {
+    global GRET;
+    set command [lindex $args 0]
+    set retkey [lindex $args 1]
+
+        send "$command\n"
+        expect {
+            -timeout 10
+                -re "$retkey" {
+                    return 1
+                }   
+            timeout {
+                send_user "\n*****error: $command string key mismatch $retkey *****\n"
+                    set GRET [expr $GRET + 1]
+                    return 0
+            }   
+        }   
+    return 1
+}
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}
+    timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+            exit 1
+    }
+}
+
+set target_prompt "/tmp"
+crash_test "cd /tmp" "$target_prompt"
+
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+set testvmcore [lindex $argv 0]
+set vmlinux [lindex $argv 1]
+set panic_type [lindex $argv 2]
+
+set expect_bt_output ""
+#crash_load ${binfile}
+crash_test "'$CRASH_TOOL_DIR'crash $testvmcore $vmlinux" "$CRASHPROMPT*"
+
+if { $panic_type == "sysrq-trigger" } {
+    set expect_bt_output ".*sysrq_handle_crash.*write_sysrq_trigger.*sys_write"
+    }
+if { $panic_type == "timer-interrupt-panic" } {
+    set expect_bt_output ".*panic.*hrtimer_interrupt.*generic_handle_irq.*handle_IRQ"
+    }
+    
+if { $panic_type == "interrupt-tasklet-panic" } {
+    set expect_bt_output ".*panic.*my_do_tasklet.*tasklet_action.*run_ksoftirqd"
+    }
+
+if { $panic_type == "kmalloc-kthread-oom" } {
+    set expect_bt_output ".*panic.*out_of_memory.*kmem_cache_alloc_trace.*kthread"
+    }
+sleep 20
+crash_test "bt" $expect_bt_output "bt list info"
+
+
+exit $GRET
+interact

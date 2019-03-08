@@ -1,0 +1,45 @@
+#!/usr/bin/expect -f
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip
+global target_prompt
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}   
+    timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        exit 1 
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt" ""
+
+set testfile wchar
+set srcfile ${testfile}.c
+set bp_location [gdb_get_line_number "START" "${srcfile}"]
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT*" ""
+
+runto "wchar.c:$bp_location"
+
+gdb_test "print narrow" "= 97 L'a'" ""
+#gdb_test "print single" "= 48879 L'\\\\xbeef'" ""
+gdb_test "print simple" "= L\"facile\"" "" 
+#gdb_test "print difficile" "= L\"\\\\xdead\\\\xbeef\\\\xfeed\\\\xface\"" ""
+gdb_test "print simple\[2\]" "= 99 L'c'" ""
+#gdb_test "print difficile\[2\]" "= 65261 L'\\\\xfeed'" ""
+
+exit $GRET
+
+interact
+

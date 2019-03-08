@@ -1,0 +1,9 @@
+break break_me
+break save-bp.c:27
+break save-bp.c:28 thread 1
+break save-bp.c:31
+  condition $bpnum i == 1
+break save-bp.c:33
+  commands
+    silent
+  end

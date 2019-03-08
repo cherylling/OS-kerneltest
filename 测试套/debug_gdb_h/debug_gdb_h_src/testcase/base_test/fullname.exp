@@ -1,0 +1,167 @@
+#!/usr/bin/expect -f 
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file tests setting breakpoints according to the full path of a
+# source file.
+
+set testfile "fullname"
+set srcfile ${testfile}.c
+set binfile ${testfile}
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+# We rely on being able to copy things around.
+
+#if { [is_remote host] } {
+#    untested "setting breakpoints by full path"
+#    return -1
+#}
+
+# Create a temporary file in the build directory.  Use a different
+# filename in case ${srcdir} == ${objdir}.
+#if { [catch {file copy -force ${srcdir}/${subdir}/${srcfile} \
+#			      ${objdir}/${subdir}/tmp-${srcfile}}] != 0 } {
+#    error "Could not create temporary file"
+#    return -1
+#}
+
+# Build the test executable using an absolute path.
+#if  { [gdb_compile "${objdir}/${subdir}/tmp-${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    return -1
+#}
+
+# Unlike most GDB tests, we do not use gdb_reinitialize_dir in this script. 
+# We're testing GDB's ability to find files in other ways.
+
+# Get the line number.
+set XX 0
+if {$XX == 1} {
+gdb_test "cp -af fullname1 fullname" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+set line [gdb_get_line_number "set breakpoint 1 here"]
+
+# Initialize GDB after getting the line number, to make sure
+# symbols aren't loaded.
+
+set msg "set breakpoint by full path before loading symbols - built absolute"
+if { [gdb_breakpoint $target_prompt/fullname_subdir/fullname_ssdir/tmp-${srcfile}:${line} {no-message}] != 0 } {
+#    pass $msg
+} else {
+    send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+}
+
+gdb_test "break main" \
+	 "Breakpoint.*at.*line.*" "set breakpoint at main - built absolute"
+
+set msg "set breakpoint by full path after loading symbols - built absolute"
+if { [gdb_breakpoint $target_prompt/fullname_subdir/fullname_ssdir/tmp-${srcfile}:${line} {no-message}] != 0 } {
+#    pass $msg
+} else {
+    send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+}
+
+# Build the test executable using a relative path.
+#if  { [gdb_compile "${subdir}/tmp-${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    return -1
+#}
+
+gdb_exit
+}
+
+gdb_test "cp -af fullname2 fullname" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+set line [gdb_get_line_number "set breakpoint 1 here"]
+
+set msg "set breakpoint by full path before loading symbols - built relative"
+if { [gdb_breakpoint $target_prompt/fullname_subdir/fullname_ssdir/tmp-${srcfile}:${line} {no-message}] != 0 } {
+#    pass $msg
+} else {
+    send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+}
+
+gdb_test "break main" \
+	 "Breakpoint.*at.*line.*" "set breakpoint at main - built relative"
+
+set msg "set breakpoint by full path after loading symbols - built relative"
+if { [gdb_breakpoint $target_prompt/fullname_subdir/fullname_ssdir/tmp-${srcfile}:${line} {no-message}] != 0 } {
+#    pass $msg
+} else {
+    send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+}
+
+gdb_exit
+# Build the test executable using relative paths not relative to the directory
+# we'll run GDB from.
+
+#set save_pwd [pwd]
+#cd ${subdir}
+#if  { [gdb_compile "tmp-${srcfile}" "${testfile}" executable {debug}] != "" } {
+#    cd $save_pwd
+#    return -1
+#}
+#cd $save_pwd
+gdb_test "cd $target_prompt/fullname_subdir/fullname_ssdir/" "$target_prompt/fullname_subdir/fullname_ssdir"
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+
+set msg "set breakpoint by full path before loading symbols - built other"
+if { [gdb_breakpoint $target_prompt/fullname_subdir/fullname_ssdir/tmp-${srcfile}:${line} {no-message}] != 0 } {
+#    pass $msg
+} else {
+    send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+}
+
+gdb_test "break main" \
+	 "Breakpoint.*at.*line.*" "set breakpoint at main - built other"
+
+set msg "set breakpoint by full path after loading symbols - built other"
+if { [gdb_breakpoint $target_prompt/fullname_subdir/fullname_ssdir/tmp-${srcfile}:${line} {no-message}] != 0 } {
+#    pass $msg
+} else {
+    send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+}
+exit $GRET
+
+interact

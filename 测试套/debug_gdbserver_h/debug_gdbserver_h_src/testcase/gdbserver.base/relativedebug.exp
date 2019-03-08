@@ -1,0 +1,136 @@
+#!/usr/bin/expect -f
+# Copyright 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile relativedebug
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if [target_info exists gdb,nosignals] {
+#    verbose "Skipping relativedebug.exp because of nosignals."
+#    continue
+#}
+
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested "Couldn't compile test program"
+#    return -1
+#}
+
+# Get things started.
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+#runto_main
+gdb_test "b main " ""
+gdb_test "c" ""
+
+# pause () -> SIGALRM -> handler () -> abort ()
+gdb_test "continue" "Program received signal SIGABRT.*"
+
+# Backtracing through pause broke if glibc has been prelinked,
+# because the separate debug files in /usr/lib/debug had different
+# base addresses.
+
+# incorrect (#6):
+# (gdb) bt
+# #0  0x00325402 in __kernel_vsyscall ()
+# #1  0x00718f20 in *__GI_raise (sig=6) at ../nptl/sysdeps/unix/sysv/linux/raise.c:64
+# #2  0x0071a801 in *__GI_abort () at abort.c:88
+# #3  0x0804841f in handler (signo=14) at ./gdb.base/relativedebug.c:27
+# #4  <signal handler called>
+# #5  0x00325402 in __kernel_vsyscall ()
+# #6  0x0077ebc6 in ?? () from /lib/i686/nosegneg/libc.so.6
+# #7  0x08048455 in main () at ./gdb.base/relativedebug.c:34
+# (gdb)
+
+# correct (#6):
+# (gdb) bt
+# #0  0x00b33402 in __kernel_vsyscall ()
+# #1  0x00718f20 in *__GI_raise (sig=6) at ../nptl/sysdeps/unix/sysv/linux/raise.c:64
+# #2  0x0071a801 in *__GI_abort () at abort.c:88
+# #3  0x0804841f in handler (signo=14) at ./gdb.base/relativedebug.c:27
+# #4  <signal handler called>
+# #5  0x00b33402 in __kernel_vsyscall ()
+# #6  0x0077ebc6 in __pause_nocancel () from /lib/i686/nosegneg/libc.so.6
+# #7  0x08048455 in main () at ./gdb.base/relativedebug.c:34
+# (gdb)
+
+gdb_test "bt" \
+         ".*\[^a-zA-Z\]pause\[^a-zA-Z\].*" \
+         "pause found in backtrace"
+gdb_exit         
+exit $GRET
+
+interact

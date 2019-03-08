@@ -1,0 +1,90 @@
+#!/usr/bin/expect -f 
+#   Copyright 2006-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test setting breakpoints on shared library functions provided by more
+# than one shared library, when one of the implementations is a "weak"
+# symbol.  GDB should set a breakpoint at the first copy it finds.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+if {$target_prompt == "USP"} {
+    set ARCH "arm"
+}
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if {[skip_shlib_tests]} {
+#    return 0
+#}
+
+# These targets have shared libraries, but weak symbols are not meaningful.
+#if {([istarget arm*-*-symbianelf*]
+#     || [istarget *-*-mingw*]
+#     || [istarget *-*-cygwin*]
+#   || [istarget *-*-pe*])} {
+#    return 0
+#}
+
+# This test uses GCC-specific syntax.
+#if [get_compiler_info not-used] {
+#    return -1
+#}
+
+#if {![test_compiler_info "gcc-*"]} {
+#    return 0
+#}
+
+set binfile solib-weak-2-dbg1
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+gdb_test_no_output "set width 144" 
+
+gdb_test "b main" "Breakpoint 1.*$gdb_prompt"
+gdb_test "r" "foo \\(\\);.*$gdb_prompt"
+gdb_test "b bar" "Breakpoint 2.*$gdb_prompt"
+
+if {$ARCH == "powerpc"} {
+    gdb_test "continue" "Continuing..*reakpoint 2, $hex in bar \\(\\) from $target_prompt/weaklib2.sl.*$gdb_prompt"
+    gdb_test "c" "bar in u2.*$inferior_exited_re.*$gdb_prompt"
+} else {
+    gdb_test "continue" "Continuing..*reakpoint 2, $hex in bar \\(\\) from $target_prompt/weaklib2.sl.*$gdb_prompt"
+    gdb_test "n" "bar in u2.*in foo \\(\\) from /tmp/for_gdb_test/base/weaklib2.sl.*$gdb_prompt"
+#    gdb_test "continue" "bar in u2.*$inferior_exited_re.*$gdb_prompt" 
+}
+exit $GRET
+
+interact

@@ -1,0 +1,117 @@
+#!/usr/bin/expect -f
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip
+global target_prompt
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}   
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt" ""
+
+
+set testfile "watch-read"
+set srcfile ${testfile}.c
+
+gdb_test "'$GDB_TOOL_DIR'gdb watch-read" "$GDBPROMPT*" ""
+
+#if {[skip_hw_watchpoint_access_tests]} {
+#    return 0
+#}
+#
+#if { [prepare_for_testing ${testfile}.exp ${testfile} ${srcfile}] } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+runto main
+
+#if { ![runto main] } then {
+#    fail "run to main"
+#    return
+#}    
+
+set read_line [gdb_get_line_number "read line" $srcfile]
+
+# Test running to a read of `global', with a read watchpoint set
+# watching it.
+
+gdb_test "rwatch global" \
+    "Hardware read watchpoint .*: global" \
+    "set hardware read watchpoint on global variable"
+
+# The first read is on entry to the loop.
+
+gdb_test "continue" \
+    "read watchpoint .*: global.*.*Value = 0.*in main.*$srcfile:$read_line.*" \
+    "read watchpoint triggers on first read"
+
+# The second read happens on second loop iteration, after `global'
+# having been incremented.  On architectures where gdb has to emulate
+# read watchpoints with access watchpoints, this tests the
+# only-report-if-value-changed logic.  On targets that support real
+# read watchpoints, this tests that GDB ignores the watchpoint's old
+# value, knowing that some untrapped write could have changed it, and
+# so reports the read watchpoint unconditionally.
+
+gdb_test "continue" \
+    "read watchpoint .*: global.*.*Value = 1.*in main.*$srcfile:$read_line.*" \
+    "read watchpoint triggers on read after value changed"
+
+# The following tests check that when the user sets a write or access
+# watchpoint watching the same memory as a read watchpoint, GDB also
+# applies the only-report-if-value-changed logic even on targets that
+# support real read watchpoints.
+
+# The program should be stopped at the read line.  Set a write
+# watchpoint (leaving the read watchpoint) and continue.  Only the
+# write watchpoint should be reported as triggering.
+
+gdb_test "watch global" \
+    "atchpoint .*: global" \
+    "set write watchpoint on global variable"
+
+gdb_test "continue" \
+    "atchpoint .*: global.*Old value = 1.*New value = 2.*" \
+    "write watchpoint triggers"
+
+set exp ""
+set exp "${exp}2.*read watchpoint.*keep y.*global.*breakpoint already hit 2 times.*"
+set exp "${exp}3.*watchpoint.*keep y.*global.*breakpoint already hit 1 time.*"
+gdb_test "info watchpoints" \
+    "$exp" \
+    "only write watchpoint triggers when value changes"
+
+# The program is now stopped at the write line.  Continuing should
+# stop at the read line, and only the read watchpoint should be
+# reported as triggering.
+
+gdb_test "continue" \
+    "read watchpoint .*: global.*Value = 2.*in main.*$srcfile:$read_line.*" \
+    "read watchpoint triggers when value doesn't change, trapping reads and writes"
+
+set exp ""
+set exp "${exp}2.*read watchpoint.*keep y.*global.*breakpoint already hit 3 times.*"
+set exp "${exp}3.*watchpoint.*keep y.*global.*breakpoint already hit 1 time.*"
+gdb_test "info watchpoints" \
+    "$exp" \
+    "only read watchpoint triggers when value doesn't change"
+
+exit $GRET
+
+interact

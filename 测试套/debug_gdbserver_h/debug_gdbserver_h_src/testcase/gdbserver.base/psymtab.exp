@@ -1,0 +1,134 @@
+#!/usr/bin/expect -f
+# Copyright 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file is part of the gdb testsuite
+
+# This is intended to be a repository for tests that partial symbols
+# are working properly.  If multiple tests are added, make sure that
+# you exit and restart GDB between tests.
+
+#
+# test running programs
+#
+
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "psymtab"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if { [skip_cplus_tests] } { continue }
+
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${testfile}1.c" "${testfile}1.o" object {debug}] != "" } {
+#     untested psymtab.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${testfile}2.c" "${testfile}2.o" object {debug}] != "" } {
+#     untested psymtab.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${testfile}1.o ${testfile}2.o" ${binfile} executable {debug}] != "" } {
+#     untested psymtab.exp
+#     return -1
+#}
+
+# Create and source the file that provides information about the compiler
+# used to compile the test case.
+#if [get_compiler_info] {
+#    return -1;
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+# Disable the prompt for whether to set pending breakpoints.
+# We don't want a breakpoint, we just want to verify the symbol
+# isn't found.
+gdb_test_no_output "set breakpoint pending off" "psymtab pending setup"
+
+# This test is looking for a bug that manifested itself when GDB was
+# looking for a partial symbol such that there wasn't such a partial
+# symbol in the psymtab, but such that the last psym in the psymtab
+# had the right name but the wrong namespace.  Here, searching for
+# zzz::dummy currently causes a search for 'zzz' in STRUCT_NAMESPACE
+# without a preceding search for 'zzz' in VAR_NAMESPACE.
+
+gdb_test "break zzz::dummy" {Function "zzz::dummy" not defined\.} "Don't search past end of psymtab."
+
+gdb_exit
+exit $GRET
+
+interact

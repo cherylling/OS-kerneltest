@@ -1,0 +1,35 @@
+#!/usr/bin/expect -f
+
+global GRET;
+global ARGC;
+set GRET 0;
+set ARGC 0;
+proc cmd_retkey {args} {
+    
+    global GRET;
+    set command [lindex $args 0]
+    set retkey [lindex $args 1]
+    send "$command\n"
+    expect {
+        -timeout 2
+        -re "$retkey" {
+            send_user "\n$command string key match $retkey\n"
+            return 0
+        }
+        timeout {
+            send_user "\n$command string key mismatch $retkey\n"
+            set GRET [expr $GRET + 1]
+            return 1
+        }
+    }
+}
+
+proc usage_exp {args} {
+    global ARGC;
+    if { $ARGC != 2 } {
+        send_user "Usage: ./x.exp ip prompt\n"
+        send_user "Usage: ./x.exp 10.67.187.22 Shanks\n"
+        exit 1
+    }
+}
+

@@ -1,0 +1,148 @@
+#!/usr/bin/expect -f 
+#   Copyright 1988, 1990-1992, 1994-1997, 1999-2000, 2007-2012 Free
+#   Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Rob Savoye. (rob@cygnus.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+# Can't do this test without stdio support.
+#if [gdb_skip_stdio_test "a2run.exp"] {
+#    return
+#}
+
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+#
+# test running programs
+#
+
+set testfile a2-run
+#if { [prepare_for_testing ${testfile}.exp $testfile run.c] } {
+#    return -1
+#}
+
+# Run with no arguments.
+# On VxWorks this justs make sure the program was run.
+gdb_test "'$GDB_TOOL_DIR'gdb a2-run"  "$gdb_prompt"
+send "r\n" 
+expect {
+	-re ".*usage:  factorial <number>.*$inferior_exited_re with code 01.*$gdb_prompt" {
+#	    pass "run \"$testfile\" with no args"
+#	    pass "no spurious messages at program exit"
+	}
+	-re ".*usage:  factorial <number>.* EXIT code 1.*$inferior_exited_re normally.\r\n$gdb_prompt" {
+#	    pass "run \"$testfile\" with no args (exit wrapper)"
+#	    pass "no spurious messages at program exit"
+	}
+	timeout	{
+	    send_user "(timeout) run \"$testfile\" no args"
+        set GRET [expr $GRET + 1]
+	}
+}
+# The remaining tests don't work for targets can't take arguments...
+
+#if [target_info exists noargs] then {
+#    verbose "Skipping rest of a2-run.exp because of noargs."
+#    return
+#}
+
+# Now run with some arguments
+send "r 5\n"
+expect {
+	    -re ".*120.*$gdb_prompt" { 
+#                pass "run \"$testfile\" with arg" 
+                }
+	    timeout	{ 
+        send_user "(timeout) run \"$testfile\" with arg" 
+        set GRET [expr $GRET + 1]
+        }
+	}
+
+# Run again with same arguments.
+
+send "r\n"
+expect {
+	    -re ".*120.*$gdb_prompt" {
+#        pass "run \"$testfile\" again with same args" 
+        }
+	    timeout	{ 
+        send_user "(timeout) run \"$testfile\" again with same args"
+        set GRET [expr $GRET + 1]
+        }
+	}
+
+# Use "set args" command to specify no arguments as default and run again.
+gdb_test_no_output "set args"
+
+send "r\n"
+expect {
+	-re ".*usage:  factorial <number>.*$gdb_prompt" {
+#	    pass "run after setting args to nil"
+	}
+	timeout {
+	    send_user "(timeout) run after setting args to nil"
+        set GRET [expr $GRET + 1]
+	}
+    }
+
+# Use "set args" command to specify an argument and run again.
+gdb_test_no_output "set args 6"
+
+send "r\n"
+expect {
+	    -re ".*720.*$gdb_prompt" {
+#		pass "run \"$testfile\" again after setting args"
+	    }
+	    timeout {
+		send_user "(timeout) run \"$testfile\" again after setting args"
+        set GRET [expr $GRET + 1]
+	    }
+	}
+
+# GOAL: Test that shell is being used with "run".  For remote debugging
+# targets, there is no guarantee that a "shell" (whatever that is) is used.
+gdb_test "run `echo 8`" "Starting program.*40320.*" "run \"$testfile\" with shell"
+
+exit $GRET
+
+interact

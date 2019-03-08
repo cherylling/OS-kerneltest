@@ -1,0 +1,181 @@
+#!/usr/bin/expect -f 
+# Copyright 1997-1999, 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#	strace $tracelevel
+#	}
+
+#global usestubs
+
+#
+# test running programs
+#
+
+# This test exists solely to exercise the "section" command for
+# code-coverage on HP-UX.  (So far as I can tell, the "section"
+# command isn't needed on HP-UX, but probably is for embedded
+# apps.)
+#
+#if ![istarget "hppa*-*-hpux*"] then {
+#  return
+#}
+
+set testfile "sect-cmd"
+set srcfile break.c
+set srcfile1 break1.c
+set binfile ${testfile}
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}0.o" object {debug nowarnings}] != "" } {
+#    untested sect-cmd.exp
+#    return -1
+#}
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile1}" "${binfile}1.o" object {debug nowarnings}] != "" } {
+#    untested sect-cmd.exp
+#    return -1
+#}
+
+#if { [gdb_compile "${binfile}0.o ${binfile}1.o" "${binfile}" executable {debug nowarnings}] != "" } {
+#    untested sect-cmd.exp
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+
+if ![runto_main] then { 
+    send_user "fail section command tests suppressed" 
+    exit -1
+    }
+
+# Get the $CODE$ section's starting address.
+#
+# (Note that this works for PA32 programs, which use the SOM file
+# format.  PA64 uses ELF, and when support for that is added, it's
+# not clear that there'll be a section named "$CODE$" in such
+# programs.)
+#
+
+set address1 ""
+set address2 ""
+send "info files -a\n"
+expect {
+   -re "Entry point: " {
+   expect {
+   -re ".*(0x\[0-9a-fA-F\]*) - (0x\[0-9a-fA-F\]*) is .(CODE|text)"\
+          {
+          #pass "info files"
+	   set address1 $expect_out(1,string)
+	   set address2 $expect_out(2,string)
+       send "q\n"
+       }
+  timeout {
+    send_user "(timeout) info files"
+    set GRET [expr $GRET + 1]
+    }
+    }
+    }
+  timeout {
+    send_user "(timeout) info files2"
+    set GRET [expr $GRET + 1]
+    }
+}
+
+# Reset the section to that same starting address, which should be
+# harmless (i.e., we just want to exercise the section command).
+#
+#if [istarget "hppa2.0w-*-*"] then {
+#  send_gdb "section \.text $address1\n"
+#  gdb_expect {
+#    -re ".*$address1 \- $address2 is .text.*$gdb_prompt $"\
+#            {pass "set section command"}
+#    -re "$gdb_prompt $"\
+#            {fail "set section command"}
+#    timeout {fail "(timeout) set section command"}
+#  }
+#} else {
+  send "section .data $address1\n"
+  expect {
+    -re ".*$address1 \- $address2 is .data.*"\
+            {#pass "set section command"
+                send "q\n"
+            }
+    timeout {send_user "(timeout) set section command"
+    set GRET [expr $GRET + 1]
+    }
+  }
+#}
+
+# Verify that GDB responds gracefully to a non-existent section name.
+#
+send "section FOOBARBAZ 0x1234\n"
+expect {
+  -re "Section FOOBARBAZ not found.*$gdb_prompt"\
+          {#pass "non-existent section disallowed"
+          }
+  timeout {send_user "(timeout) non-existent section disallowed"
+    set GRET [expr $GRET + 1]
+  }
+}
+
+# We "happen to know" that GDB uses a fixed size character buffer to
+# parse the section name into, and the buffer is declared to be 100
+# characters in length.  Verify that GDB gracefully handles section
+# names longer than that.  (The section is also non-existent.)
+#
+send "section A234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123 0x1234\n"
+expect {
+  -re "Section A23456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 not found.*$gdb_prompt"\
+          {#pass "non-existent too-long section disallowed
+          }
+  timeout {send_user "(timeout) non-existent too-long section disallowed"
+    set GRET [expr $GRET + 1]
+  }
+}
+
+gdb_exit
+exit $GRET
+
+interact

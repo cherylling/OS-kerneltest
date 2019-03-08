@@ -1,0 +1,115 @@
+#!/usr/bin/expect -f 
+# Copyright 2007, 2009-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# When gdb resolves type information for class "derived" from objfile
+# gdb2384, it use to fill in the TYPE_VPTR_BASETYPE field with class "base"
+# from objfile gdb2384-base.so.  When the program is rerun the type
+# information for base-in-so-base.so is discarded leaving
+# TYPE_VPTR_BASETYPE dangling.
+#
+# PR c++/9489.
+#if { [skip_cplus_tests] } { continue }
+#if { [skip_shlib_tests] } { continue }
+
+set testfile "gdb2384"
+set srcfile ${testfile}.cc
+set binfile $testfile
+
+set libfile "gdb2384-base"
+set libsrcfile ${libfile}.cc
+set sofile ${libfile}.so
+
+# Create and source the file that provides information about the compiler
+# used to compile the test case.
+#if [get_compiler_info ${binfile} "c++"] {
+#    return -1
+#}
+
+#if { [gdb_compile_shlib $srcdir/$subdir/$libsrcfile $sofile {debug c++}] != ""
+#     || [gdb_compile $srcdir/$subdir/$srcfile $binfile executable [list debug "c++" shlib=${sofile}]] != ""} {
+#    untested gdb2384.exp
+#    return -1
+#}
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+
+if ![runto_main] then {
+#    perror "couldn't run to breakpoint"
+    exit -1
+}
+
+gdb_breakpoint [gdb_get_line_number "set breakpoint here"]
+gdb_continue_to_breakpoint "set breakpoint here"
+
+gdb_test "print d1.meth ()" \
+    ".*42.*" \
+    "print d1.meth ()"
+
+# Now try again.  gdb's without the fix will hopefully segv here
+
+runto_main
+gdb_breakpoint [gdb_get_line_number "set breakpoint here"]
+gdb_continue_to_breakpoint "set breakpoint here"
+gdb_test "print d1.meth ()" \
+    ".*42.*" \
+    "gdb2384"
+
+# second case
+
+runto_main
+gdb_breakpoint [gdb_get_line_number "set breakpoint here (second)"]
+gdb_continue_to_breakpoint "set breakpoint here (second)"
+gdb_test "print d2.meth ()" \
+    ".*24.*" \
+    "print d2.meth()"
+
+runto_main
+gdb_breakpoint [gdb_get_line_number "set breakpoint here (second)"]
+gdb_continue_to_breakpoint "set breakpoint here (second)"
+gdb_test "print d2.meth ()" \
+    ".*24.*" \
+    "gdb2384 (second)"
+
+exit $GRET
+
+interact

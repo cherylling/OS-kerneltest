@@ -1,0 +1,249 @@
+#!/bin/bash
+######################################################################
+# @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.  
+# @File name: configure # @Author1:star<yexinxin@huawei.com> ID:00197803
+# @Date: 2013-04-16
+# @Description: RATF will exec this file before compile
+######################################################################
+set -x
+top_src=${PWD}
+
+# RATF will run configure like:
+# ./configure cross_compile=$CROSS_COMPILE --host=$HOST_TARGET --target=$HOST_TARGET --prefix=$INSTALL_DIR
+# now get the value
+echo "debug:configure arguments: $*"
+for ac_option
+do
+    case ${ac_option} in
+        *=?*) ac_optarg=`expr "X${ac_option}" : '[^=]*=\(.*\)'` ;;
+        *=)   ac_optarg= ;;
+        *)    ac_optarg=yes ;;
+    esac
+    case ${ac_option} in
+        --host=*)
+        host_alias=${ac_optarg} ;;
+
+        --prefix=*)
+        prefix=${ac_optarg} ;;
+        *)
+        ;;
+    esac
+done
+
+#The value of host_alias is from ${HOST} by RATF(see ../config/)
+case "X${host_alias}" in
+    "X")
+    CC="gcc" 
+    AR="ar"
+    ;;
+    *)
+    CC="${host_alias}-gcc" 
+    AR="${host_alias}-ar"
+    ;;
+esac
+
+echo "debug: CC : ${CC}"
+
+:<<COMMENT
+case $PRODUCT_NAME in
+    #parc use 32bit to compile a program
+    "X86-MBSC-"* | "PARC")
+    CC=${CC//64/32}
+    AR=${AR//64/32}
+    ;;
+esac
+COMMENT
+
+cat >mk/config.mk << EOF
+######################################################################
+# @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.  
+# @File name: config.mk
+# @What you can do: 
+#     1.If you want to install some files to other directories
+#       (not TOOL_BIN_DIR), plz add a parameter here via modifying configure,
+#       then use it in your Makefile. Like TOOL_MOD_DIR
+#     2.If you want to add any other parameters which depends on the
+#       tool-chain, plz get the value via configure and add them here,
+#       then use them in your Makefile. Like AR
+#     3.If you want to add some parameters that already have values,
+#       plz add them to env_post.mk. Like CFLAGS
+######################################################################
+TOP_SRC         := ${top_src}
+TOOL_BIN_DIR    := ${TOOL_BIN_DIR}
+TOOL_CFG_DIR    := ${TOOL_BIN_DIR}/../config
+TOOL_MOD_DIR    := ${TOOL_BIN_DIR}/../module
+TOOL_LIB_DIR    := ${TOOL_BIN_DIR}/../../lib
+CC              := ${CC}
+AR              := ${AR}
+EOF
+
+case $PRODUCT_NAME in
+    #parc use 64bit to make a program in kernel
+    "X86-MBSC-"* | "PARC")
+    CROSS_COMPILE=${CROSS_COMPILE//32/64}
+    ;;
+esac
+
+cat >mk/kernel.mk << EOF
+######################################################################
+# @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.  
+# @File name: kernel.mk
+# @What you can do: 
+#     1.These parameters are used in Makefile to make modules.
+#       You can add anyother parameters if you need....
+######################################################################
+KERNEL_DIR      := ${KERNEL_DIR}
+ARCH            := ${ARCH}
+CROSS_COMPILE   := ${CROSS_COMPILE}
+EOF
+
+#do make test, if failed exit
+mkdir tmp
+cd tmp
+cat >test.c<< EOF
+#include <stdio.h>
+int main()
+{
+    return 0;
+}
+EOF
+
+cat >Makefile<< EOF
+include ${top_src}/mk/config.mk
+test:test.c
+	\$(CC) -MT \$@ -MD -MP -MF test.Tpo -o \$@ \$<
+EOF
+make
+if [ 0 -ne 0 ];then
+    echo "Error: make test.c failed"
+    exit 1
+fi
+cd ${top_src}
+rm -rf tmp
+######################################################################
+# @What you can do:
+#     1.put patches to the source files
+#     2.cp config file to anywhere you like
+#     3.notice: this is just a shell script. You can do anyother
+#       things you want to
+######################################################################
+#to make hugetlb programs needs these files
+
+case ${CC} in
+    "arm-"*gcc)
+    if [ ! -z `echo "$CROSS_COMPILER_SDK" | grep -E "arm[Aa]9[le][le]"` ];then 
+	    cp $top_src/lib/ldscripts/armA9le/* $top_src/lib/ldscripts
+    elif [ ! -z `echo "$CROSS_COMPILER_SDK" | grep -E "arm64[lbe]*[lbe]*"` ];then
+        cp $top_src/lib/ldscripts/aarch64/* $top_src/lib/ldscripts
+    else
+        cp -avf $top_src/lib/ldscripts/armA9le/* $top_src/lib/ldscripts/arm
+    fi
+    ;;
+    "armeb-"*gcc)
+    echo "$CROSS_COMPILER_SDK" | grep -E "arm[Aa]9[be][be]" 
+	[ $? -eq 0 ] && cp $top_src/lib/ldscripts/armA9be/* $top_src/lib/ldscripts
+    echo "$CROSS_COMPILER_SDK" | grep -E "arm[Aa]15[be][be]"
+	[ $? -eq 0 ] && cp $top_src/lib/ldscripts/armA15be/* $top_src/lib/ldscripts
+    cp -avf $top_src/lib/ldscripts/armA9be/* $top_src/lib/ldscripts/arm
+    ;;
+    "arm32"*gcc)
+    if [ ! -z `echo "${CC}" | grep "be"` ];then
+	    if [ ! -z `echo "$CROSS_COMPILER_DIR" | grep -E "arm32[Aa]15{be|eb}"` ];then
+		cp -avf $top_src/lib/ldscripts/armA15be/* $top_src/lib/ldscripts/arm
+		cp $top_src/testcase/record-e/perf_event_arma15.cfg $top_src/testcase/record-e/perf_event.cfg
+	    else
+		cp -avf $top_src/lib/ldscripts/armA9be/* $top_src/lib/ldscripts/arm
+		cp $top_src/testcase/record-e/perf_event_arma9.cfg $top_src/testcase/record-e/perf_event.cfg
+	    fi
+    else
+	    if [ ! -z `echo "$CROSS_COMPILER_DIR" | grep -E "arm32[Aa]15{be|eb}"` ];then
+		cp -avf $top_src/lib/ldscripts/armA15le/* $top_src/lib/ldscripts/arm
+		cp $top_src/testcase/record-e/perf_event_arma15.cfg $top_src/testcase/record-e/perf_event.cfg
+	    else
+		cp -avf $top_src/lib/ldscripts/armA9le/* $top_src/lib/ldscripts/arm
+		cp $top_src/testcase/record-e/perf_event_arma9.cfg $top_src/testcase/record-e/perf_event.cfg
+	    fi
+    fi
+    ;;
+    "aarch64"*gcc)
+    if [ ! -z `echo "${CC}" | grep "be"` ];then
+	cp -avf $top_src/lib/ldscripts/aarch64be/* $top_src/lib/ldscripts/arm64
+    else
+	cp -avf $top_src/lib/ldscripts/aarch64/* $top_src/lib/ldscripts/arm64
+    fi
+	cp $top_src/testcase/record-e/perf_event_arm64.cfg $top_src/testcase/record-e/perf_event.cfg
+    ;;
+    "powerpc-"*gcc)
+	cp $top_src/lib/ldscripts/powerpc/* $top_src/lib/ldscripts
+    ;;
+    "x86_64"*gcc)
+    cp $top_src/lib/ldscripts/x86_64/* $top_src/lib/ldscripts
+	cp $top_src/testcase/record-e/perf_event_x86.cfg $top_src/testcase/record-e/perf_event.cfg
+    ;;
+    "x86_32"*gcc)
+    cp $top_src/lib/ldscripts/x86_32/* $top_src/lib/ldscripts
+	cp $top_src/testcase/record-e/perf_event_x86.cfg $top_src/testcase/record-e/perf_event.cfg
+    ;;
+esac
+
+echo "debug:configure arguments: CROSS_COMPILER_SDK=$CROSS_COMPILER_SDK"
+
+###
+# copy vmlinux to target dir & get schedule addr for 'perf probe'
+##
+VMLINUX=${KERNEL_DIR}/vmlinux
+nr_vmlinux=`ls $VMLINUX | wc -l 2>/dev/null`
+OBJDUMP=${CROSS_COMPILE}objdump
+if [ ! -e ${CROSS_COMPILER_DIR}/bin/${OBJDUMP} ];then
+    OBJDUMP=objdump
+fi
+
+if [ $nr_vmlinux -ne 1 ];then
+    echo "Error: path of vmlinux is error"
+    ls $VMLINUX
+else
+    cp -avf $VMLINUX $top_src/testcase/user_prg/vmlinux
+	if [ $? -eq 0 ];then
+		echo "[INFO] copy vmlinux success"
+		cd $top_src/testcase/user_prg/
+		${OBJDUMP} -d vmlinux > vmlinux.obj
+		index=0
+		for i in `cat vmlinux.obj | grep "<schedule>:" -A 6 | grep -vE '_mcount|__fentry__' | sed "1,1d" | awk -F: '{print $1}'`
+		do
+			addr=${i}
+			eval addr_$index=0x\$addr;
+			eval echo "addr_$index=\$addr_$index"
+			index=$((index+1))
+		done
+		let addr_0=$addr_0
+		let addr_1=$addr_1
+		let addr_2=$addr_2
+		let addr_3=$addr_3
+		let addr_4=$addr_4
+		[ -e perf_probe_schedule_spacing.cfg ] && rm -rf perf_probe_schedule_spacing.cfg
+		echo `expr $addr_1 - $addr_0` >> perf_probe_schedule_spacing.cfg 
+		echo `expr $addr_2 - $addr_0` >> perf_probe_schedule_spacing.cfg
+		echo `expr $addr_3 - $addr_0` >> perf_probe_schedule_spacing.cfg
+		echo `expr $addr_4 - $addr_0` >> perf_probe_schedule_spacing.cfg
+
+		rm -rf vmlinux.obj
+		cd -
+	fi
+fi
+
+#set support perf record -e mem: -k by RTOS
+:<<COMMENT
+case ${ARCH} in
+    *arm*)
+    echo "testcases in record-e-mem-arm support ARCH=${ARCH}"
+    sed -i '/^is_support=/c is_support=1' $top_src/testcase/common_file/record-e-mem_common.sh
+    ;;
+    *)
+    echo "testcases in record-e-mem-arm not support ARCH=${ARCH}"
+    sed -i '/^is_support=/c is_support=0' $top_src/testcase/common_file/record-e-mem_common.sh
+    ;;
+esac
+COMMENT
+    echo "testcases in record-e-mem-arm support ARCH=${ARCH}"
+    sed -i '/^is_support=/c is_support=1' $top_src/testcase/common_file/record-e-mem_common.sh
+

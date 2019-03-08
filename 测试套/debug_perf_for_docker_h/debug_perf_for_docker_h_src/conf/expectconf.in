@@ -1,0 +1,3 @@
+set exp_user TARGET_USER
+set exp_target_ip IP_ADDR
+set exp_install_dir INSTALL_DIR

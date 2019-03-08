@@ -1,0 +1,62 @@
+#!/usr/bin/expect -f
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT 
+global target_ip
+global target_prompt
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}   
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt" ""
+
+set testfile watchpoint-hw-hit-once
+set srcfile ${testfile}.c
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT*" ""
+#gdb_test "b main" "$GDBPROMPT*" ""
+#gdb_test "r" "dummy = 0" "" 
+
+
+#if {[skip_hw_watchpoint_access_tests]} {
+#    return 0
+#}
+
+#set test watchpoint-hw-hit-once
+#set srcfile ${test}.c
+#if { [prepare_for_testing ${test}.exp ${test} ${srcfile}] } {
+#    return -1
+#}
+
+if ![runto main] {
+    return -1
+}
+
+gdb_test "rwatch watchee" "$GDBPROMPT"
+
+gdb_breakpoint [gdb_get_line_number "break-at-exit"]
+
+gdb_test "continue" "Continuing.\r\nHardware read watchpoint \[0-9\]+: watchee\r\n\r\nValue = 0\r\n.*"
+
+# Here should be no repeated notification of the read watchpoint.
+gdb_test "continue" \
+	 "Continuing\\.\[ \r\n\]+Breakpoint \[0-9\]+, .*break-at-exit.*" \
+	 "continue to break-at-exit"
+
+exit $GRET
+
+interact

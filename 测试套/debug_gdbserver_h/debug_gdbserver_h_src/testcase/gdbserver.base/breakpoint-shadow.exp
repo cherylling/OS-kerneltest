@@ -1,0 +1,133 @@
+#!/usr/bin/expect -f
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile breakpoint-shadow
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set binfile ${objdir}/${subdir}/${testfile}
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested "Couldn't compile test program"
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+# We need to start the inferior to place the breakpoints in the memory at all.
+#if ![runto_main] {
+#    untested start
+#    return -1
+#}
+
+gdb_test "b main" ""
+gdb_test "c" ""
+
+# The default "auto" mode removes all the breakpoints when we stop (and not
+# running the nonstop mode).  We would not be able to test the shadow.
+gdb_test_no_output "set breakpoint always-inserted on"
+gdb_test "show breakpoint always-inserted" "Always inserted breakpoint mode is on."
+
+set match "\nDump of assembler code for function main:\r\n(.*)End of assembler dump.\r\n$gdb_prompt $"
+
+set test "disassembly without breakpoints"
+set orig 0
+set got 1
+send "disass main\n"
+expect {
+    -re $match {
+    	set orig $expect_out(1,string)
+	pass $test
+    }
+}
+
+gdb_test "b [gdb_get_line_number "break-first"]" "Breakpoint \[0-9\] at .*" "First breakpoint placed"
+gdb_test "b [gdb_get_line_number "break-second"]" "Breakpoint \[0-9\] at .*" "Second breakpoint placed"
+
+set test "disassembly with breakpoints"
+send "disass main\n"
+expect {
+    -re $match {
+    	set got $expect_out(1,string)
+	if [string equal -nocase $orig $got] {
+	    pass $test
+	} else {
+	    fail $test
+	}
+    }
+}
+
+gdb_exit
+exit $GRET
+
+interact

@@ -1,0 +1,159 @@
+#!/usr/bin/expect -f
+#   Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test that 'set breakpoint always-inserted 1' is not a brick
+# Also verifies that breakpoint enabling/disabling works properly
+# with duplicated breakpoints.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "break-always"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if { [prepare_for_testing break-always.exp break-always break-always.c] } {
+#    return -1
+#}
+
+set bar_location [gdb_get_line_number "break in bar" break-always.c]
+
+gdb_test_no_output "set breakpoint always-inserted on"
+
+gdb_test "show breakpoint always-inserted" "mode is on\." \
+    "confirm breakpoint always-inserted"
+
+runto foo
+
+gdb_test "break bar" "Breakpoint 2.*" "set breakpoint on bar"
+gdb_test "break bar" "Note: breakpoint 2 also set.*Breakpoint 3.*" "set 2nd breakpoint on bar"
+gdb_test "break bar" "Note: breakpoints 2 and 3 also set.*Breakpoint 4.*" "set 3rd breakpoint on bar"
+gdb_test "break bar" "Note: breakpoints 2, 3 and 4 also set.*Breakpoint 5.*" "set 4th breakpoint on bar"
+gdb_test "info breakpoints" "keep y.*keep y.*keep y.*keep y.*keep y.*" "initial check breakpoint state"
+gdb_test_no_output "disable" "initial disable all breakpoints"
+gdb_test_no_output "enable" "initial enable all breakpoints"
+gdb_test_no_output "disable" "re-disable all breakpoints"
+gdb_test_no_output "enable 3" "enable 3.A"
+gdb_test_no_output "disable 3" "disable 3.B"
+gdb_test_no_output "enable 3" "enable 3.C"
+gdb_test_no_output "enable 2" "enable 2.D"
+gdb_test_no_output "disable 2" "disable 2.E"
+gdb_test_no_output "disable 3" "disable 3.F"
+gdb_test_no_output "enable 3" "enable 3.G"
+gdb_test_no_output "enable 2" "enable 2.H"
+gdb_test_no_output "disable 2" "disable 2.I"
+gdb_test "info breakpoints" "keep n.*keep n.*keep y.*keep n.*keep n.*" "before re-enable check breakpoint state"
+gdb_test_no_output "enable" "re-enable all breakpoints"
+
+set bp_address 0
+set test "set breakpoint on bar 2"
+send "break bar\n"
+expect {
+    -re "Breakpoint 6 at ($hex).*$gdb_prompt" {
+	set bp_address $expect_out(1,string)
+	pass $test
+    }
+    timeout {
+        fail "timeout break bar"
+    }
+}
+
+# Save the original INSN under the breakpoint.
+gdb_test "p /x \$shadow = *(char *) $bp_address" \
+    " = $hex" \
+    "save shadow"
+
+# Overwrite memory where the breakpoint is planted.  GDB should update
+# its memory breakpoint's shadows, to account for the new contents,
+# and still leave the breakpoint insn planted.  Try twice with
+# different values, in case we happen to be writting exactly what was
+# there already.
+gdb_test "p /x *(char *) $bp_address = 0" \
+    " = 0x0" \
+    "write 0 to breakpoint's address"
+gdb_test "p /x *(char *) $bp_address" \
+    " = 0x0" \
+    "read back 0 from the breakpoint's address"
+
+gdb_test "p /x *(char *) $bp_address = 1" \
+    " = 0x1" \
+    "write 1 to breakpoint's address"
+gdb_test "p /x *(char *) $bp_address" \
+    " = 0x1" \
+    "read back 1 from the breakpoint's address"
+
+# Restore the original contents.
+gdb_test "p /x *(char *) $bp_address = \$shadow" ""
+
+# Run to breakpoint.
+gdb_continue_to_breakpoint "bar" ".*break-always.c:$bar_location.*"
+
+gdb_exit
+exit $GRET
+
+interact

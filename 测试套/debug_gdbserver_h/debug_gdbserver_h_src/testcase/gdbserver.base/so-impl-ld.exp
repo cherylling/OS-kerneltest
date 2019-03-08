@@ -1,0 +1,138 @@
+#!/usr/bin/expect -f
+# Copyright 1997-2001, 2003, 2005, 2007-2012 Free Software Foundation,
+# Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "so-impl-ld"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if {[skip_shlib_tests]} {
+#    return 0
+#}
+
+set libfile "solib1"
+#set srcfile $srcdir/$subdir/$testfile.c
+#set libsrc  $srcdir/$subdir/$libfile.c
+#set binfile $objdir/$subdir/$testfile
+#set lib_sl  $objdir/$subdir/$libfile.sl
+
+#set lib_opts  debug
+#set exec_opts [list debug shlib=$lib_sl]
+
+#if [test_compiler_info "hpcc-*"] {
+#    lappend exec_opts "additional_flags=-Ae"
+#}
+
+# This program implicitly loads SOM shared libraries.
+#
+#if ![runto_main] then { fail "implicit solibs tests suppressed" }
+
+gdb_test "b main" ""
+gdb_test "c" ""
+
+# Verify that we can step over the first shlib call.
+#
+gdb_test "next" "21\[ \t\]*result = solib_main .result.;" \
+    "step over solib call"
+
+# Verify that we can step into the second shlib call.
+#
+gdb_test "step" "solib_main .arg=10000. at.*${libfile}.c:17.*" \
+    "step into solib call"
+
+# Verify that we can step within the shlib call.
+#
+gdb_test "next" "18\[ \t\]*\}" "step in solib call"
+
+# Verify that we can step out of the shlib call, and back out into
+# the caller.
+#
+send "next\n"
+expect {
+    -re "0x\[0-9a-f\]*\[ \t\]*9\[ \t\]*.*$gdb_prompt" {
+	gdb_test "next" \
+	    "main .. at.*so-impl-ld.c:22.*" \
+	    "step out of solib call"
+    }
+    -re "main .. at.*so-impl-ld.c:22.*$gdb_prompt" {
+	pass "step out of solib call"
+    }
+    timeout {
+        fail "timeout next"
+    }
+}
+
+gdb_exit
+
+exit $GRET
+
+interact

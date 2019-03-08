@@ -1,0 +1,77 @@
+#!/usr/bin/expect -f 
+# Copyright 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test GDB's internal buffers safety for the GCORE command.
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+set testfile "gcore-buffer-overflow"
+set srcfile  ${testfile}.c
+# The ${binfile} basename needs to exceed 80 characters (`sizeof (psargs)')
+# plus some additional data to overwrite the stack frame.
+set pattern  01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+set binfile  ${testfile}-${pattern}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#     untested ${testfile}.exp
+#     return -1
+#}
+
+# Start with a fresh gdb.
+
+
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+# Does this gdb support gcore?
+gdb_test "help gcore"   "Save a core file .*$gdb_prompt" 
+
+gdb_test_no_output "set args ${pattern}"	\
+    "Set buffer exceeding arguments"
+
+if { ! [ runto_main ] } then {
+   exit -1
+}
+
+set escapedfilename $target_prompt/gcore-buffer-overflow.test
+
+set test "save a corefile"
+gdb_test "gcore $target_prompt/gcore-buffer-overflow.test" "Saved corefile ${escapedfilename}.*$gdb_prompt" 
+exit $GRET
+
+interact

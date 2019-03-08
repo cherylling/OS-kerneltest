@@ -1,0 +1,117 @@
+#!/usr/bin/expect -f
+
+#   Copyright 1998-1999, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT 
+global target_ip 
+global  target_prompt 
+global hex
+spawn ssh root@$target_ip
+
+expect {
+    -timeout 2
+        -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+        }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+            set GRET [expr $GRET + 1]
+    }   
+}
+
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt*"
+gdb_test "'$GDB_TOOL_DIR'gdb break-always" "$GDBPROMPT"
+gdb_test "set breakpoint always-inserted on" "$GDBPROMPT"
+gdb_test "show breakpoint always-inserted" "mode is on\." \
+    "confirm breakpoint always-inserted"
+
+gdb_test "b foo" "$GDBPROMPT"
+gdb_test "r" "return bar \\(\\);.*$GDBPROMPT"
+
+gdb_test "break bar" "Breakpoint 2.*" "set breakpoint on bar"
+gdb_test "break bar" "Note: breakpoint 2 also set.*Breakpoint 3.*" "set 2nd breakpoint on bar"
+gdb_test "break bar" "Note: breakpoints 2 and 3 also set.*Breakpoint 4.*" "set 3rd breakpoint on bar"
+gdb_test "break bar" "Note: breakpoints 2, 3 and 4 also set.*Breakpoint 5.*" "set 4th breakpoint on bar"
+gdb_test "info breakpoints" "keep y.*keep y.*keep y.*keep y.*keep y.*" "initial check breakpoint state"
+gdb_test "disable" "$GDBPROMPT" "initial disable all breakpoints" 
+gdb_test "enable" "$GDBPROMPT" "initial enable all breakpoints"
+gdb_test "disable" "$GDBPROMPT" "re-disable all breakpoints"
+gdb_test "enable 3" "$GDBPROMPT"  "enable 3.A"
+gdb_test "disable 3" "$GDBPROMPT" "disable 3.B"
+gdb_test "enable 3" "$GDBPROMPT" "enable 3.C"
+gdb_test "enable 2" "$GDBPROMPT" "enable 2.D"
+gdb_test "disable 2" "$GDBPROMPT" "disable 2.E"
+gdb_test "disable 3" "$GDBPROMPT" "disable 3.F"
+gdb_test "enable 3" "$GDBPROMPT" "enable 3.G"
+gdb_test "enable 2" "$GDBPROMPT" "enable 2.H"
+gdb_test "disable 2" "$GDBPROMPT" "disable 2.I"
+gdb_test "info breakpoints" "keep n.*keep n.*keep y.*keep n.*keep n.*" "before re-enable check breakpoint state"
+gdb_test "enable" "$GDBPROMPT" "re-enable all breakpoints"
+
+set bp_address 0
+set test "set breakpoint on bar 2"
+#gdb_test "break bar" "Breakpoint 6 at ($hex).*$GDBPROMPT"
+send "break bar\n"
+expect {
+    -timeout 2
+        -re "Breakpoint 6 at ($hex)" {
+            set bp_address $expect_out(1,string)
+#            send_user "\n$command string key match $retkey\n"
+        }
+    timeout {
+        send_user "\n ---***---  string key mismatch ---***--- \n"
+            set GRET [expr $GRET + 1]
+    }
+}
+
+# Save the original INSN under the breakpoint.
+gdb_test "p /x \$shadow = *(char *) $bp_address" \
+    " = $hex" \
+    "save shadow"
+
+# Overwrite memory where the breakpoint is planted.  GDB should update
+# its memory breakpoint's shadows, to account for the new contents,
+# and still leave the breakpoint insn planted.  Try twice with
+# different values, in case we happen to be writting exactly what was
+# there already.
+gdb_test "p /x *(char *) $bp_address = 0" \
+    " = 0x0" \
+    "write 0 to breakpoint's address"
+gdb_test "p /x *(char *) $bp_address" \
+    " = 0x0" \
+    "read back 0 from the breakpoint's address"
+
+gdb_test "p /x *(char *) $bp_address = 1" \
+    " = 0x1" \
+    "write 1 to breakpoint's address"
+gdb_test "p /x *(char *) $bp_address" \
+    " = 0x1" \
+    "read back 1 from the breakpoint's address"
+
+# Restore the original contents.
+gdb_test "p /x *(char *) $bp_address = \$shadow" ""
+
+# Run to breakpoint.
+gdb_test "c" ".*break-always.c:20.*"
+
+exit $GRET
+
+interact

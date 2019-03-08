@@ -1,0 +1,152 @@
+#!/usr/bin/expect -f
+# Copyright 2009, 2011-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile valgrind-db-attach
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set db_command "--db-command=$GDB $INTERNAL_GDBFLAGS $GDBFLAGS [host_info gdb_opts] %f %p"
+#regsub -all " " $db_command "\\ " db_command
+
+#set test "spawn valgrind"
+#set cmd "valgrind --db-attach=yes $db_command $binfile"
+#set res [remote_spawn host $cmd];
+#if { $res < 0 || $res == "" } {
+#    verbose -log "Spawning $cmd failed."
+#   unsupported $test
+#    return -1
+#}
+#pass $test
+# Declare GDB now as running.
+#set gdb_spawn_id -1
+
+# GDB spawned by `valgrind --db-attach=yes' stops already after the startup is
+# executed, like with non-extended gdbserver.  It is also not correct to
+# run/attach the inferior.
+#set use_gdb_stub 1
+
+set test "valgrind started"
+# The trailing '.' differs for different memcheck versions.
+
+gdb_test "b main"
+send "c\n"
+expect {
+    -re "Memcheck, a memory error detector\\.?" {
+	pass $test
+    }
+    -re "valgrind: failed to start tool 'memcheck' for platform '.*': No such file or directory" {
+	fail "unsupported $test"
+#	return -1
+    }
+    -re "valgrind: wrong ELF executable class" {
+	fail "unsupported $test"
+#	return -1
+    }
+    -re "command not found" {
+	# The spawn succeeded, but then valgrind was not found - e.g. if
+	# we spawned SSH to a remote system.
+	fail "unsupported $test"
+#	return -1
+    }
+    timeout {
+        fail "$test"
+    }
+}
+
+set double_free [gdb_get_line_number "double-free"]
+
+set test "attach to debugger"
+send "\n"
+expect {
+    -re "Invalid free\\(\\).*: main \\(${srcfile}:$double_free\\)\r\n.*---- Attach to debugger \\? --- \[^\r\n\]* ---- " {
+	send "y\r"
+    }
+    -re "---- Attach to debugger \\? --- \[^\r\n\]* ---- " {
+	send "n\r"
+	exp_continue
+    }
+}
+
+gdb_test "" ".*" "eat first prompt"
+
+# Initialization from default_gdb_start.
+gdb_test_no_output "set height 0"
+gdb_test_no_output "set width 0"
+
+gdb_test "bt" "in main \\(.*\\) at .*${srcfile}:$double_free"
+
+# Explicitly kill the program so it doesn't dump core when we quit->detach.
+gdb_test "kill" "Kill the program being debugged.*y or n." 
+gdb_test "y" ""
+gdb_exit
+exit $GRET
+
+interact

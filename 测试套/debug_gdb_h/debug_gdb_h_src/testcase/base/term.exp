@@ -1,0 +1,100 @@
+#!/usr/bin/expect -f 
+#   Copyright 1988, 1990-1992, 1994-1997, 1999, 2007-2012 Free Software
+#   Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Rob Savoye. (rob@cygnus.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+# Don't try this for remote targets.
+#if [is_remote target] then {
+#    continue
+#}
+
+#if [target_info exists noargs] then {
+#    verbose "Skipping term.exp because of noargs."
+#    return
+#}
+
+#gdb_start
+gdb_test "'$GDB_TOOL_DIR'gdb term" "$gdb_prompt"
+#
+# test running programs
+#
+
+#if { [prepare_for_testing term.exp term run.c] } {
+#   return -1
+#}
+
+gdb_test_no_output "set print sevenbit-strings"
+gdb_test_no_output "set print address off"
+gdb_test_no_output "set width 0"
+
+gdb_test "info terminal" "No saved terminal information.*" "test info terminal"
+send "run 5\n"
+expect {
+    -re "120.*$inferior_exited_re normally.*$gdb_prompt" {
+	gdb_test "info terminal" "No saved terminal information.*" "test info terminal #2"
+    }
+    default {
+	send_user "fail term.exp, factorial didn't run to completion for info terminal"
+    set GRET [expr $GRET + 1]
+    }
+}
+
+# In mid-execution
+gdb_test "b main\n" "$gdb_prompt"
+send "run 5\n"
+expect {
+    -re "Breakpoint \[0-9\]+,.*main.*if .argc != 2.*$gdb_prompt" {
+	gdb_test "info terminal" "Inferior's terminal status .currently saved by GDB.:.*" "info terminal at breakpoint"
+    }
+    default	{ 
+    send_user "fail info terminal at breakpoint" 
+    set GRET [expr $GRET + 1]
+    }
+}
+exit $GRET
+
+interact

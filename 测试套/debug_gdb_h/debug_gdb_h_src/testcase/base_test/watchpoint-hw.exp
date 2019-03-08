@@ -1,0 +1,87 @@
+#!/usr/bin/expect -f
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT 
+global target_ip
+global target_prompt
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}   
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt" ""
+
+#if {[skip_hw_watchpoint_tests]} {
+#    return 0
+#}
+
+set testfile watchpoint-hw
+set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile"  "$GDBPROMPT*" ""
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested "Couldn't compile test program"
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+# Create the watchpoint before the inferior gets started.  Now the native CPU
+# target is still not active and its `to_can_use_hw_breakpoint' is not
+# installed, therefore only a software watchpoint gets created.
+
+gdb_test "watch watchee" "atchpoint 1: watchee"
+
+# `runto_main' or `runto main' would delete the watchpoint created above.
+
+#if { [gdb_start_cmd] < 0 } {
+#    untested start
+#    return -1
+#}
+send "start\n"
+expect {
+    -timeout 240
+    -re "main .* at .*" {
+    }
+    timeout {
+        send_user "start timeout"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+# Check it is really a `hw'-watchpoint.
+send "info watchpoints\n"
+expect {
+    -timeout 15
+    -re "Num     Type           Disp Enb Address            What.*1       hw watchpoint  keep y                      watchee.*$GDBPROMPT" {
+    }
+    -re "Num     Type           Disp Enb Address    What.*1       hw watchpoint  keep y              watchee.*$GDBPROMPT" {
+    }
+    -re ".*1       watchpoint     keep y              watchee.*$GDBPROMPT" {
+    }
+    timeout {
+        send_user "timeout 80"
+        set GRET [expr $GRET + 1]
+    }
+}
+exit $GRET
+
+interact
+

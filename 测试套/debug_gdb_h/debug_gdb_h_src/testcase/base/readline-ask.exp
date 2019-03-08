@@ -1,0 +1,111 @@
+#!/usr/bin/expect -f 
+# Copyright (C) 2011-2012 Free Software Foundation, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+
+set testfile readline-ask
+set executable ${testfile}.x
+set srcfile ${testfile}.c
+set binfile ${executable}
+set inputrc ${testfile}.inputrc
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" object {debug}] != "" } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+# INPUTRC gets reset for the next testfile.
+gdb_test "setenv INPUTRC $inputrc" "$target_prompt"
+#clean_restart ${executable}
+gdb_test "'$GDB_TOOL_DIR'gdb $executable" "$gdb_prompt"
+
+gdb_test_no_output "set width 50"
+gdb_test_no_output "set height 3"
+
+set cmd "p symbol_0"
+send "$cmd\t"
+set test "bell for more message"
+gdb_test "" "$cmd\007"
+
+send "\t"
+set test "more message for 01 and 02"
+gdb_test "" "^\r\nsymbol_01_length_40_____________________\r\nsymbol_02_length_40_____________________\r\n--More--" 
+
+# There get some VT100 characters printed.
+
+send "\r"
+set test "more message for 03"
+gdb_test "" "\rsymbol_03_length_40_____________________\r\n--More--" 
+
+# "$gdb_prompt $" will not match as $cmd gets output: $gdb_prompt p symbol_0
+# And "$gdb_prompt p symbol_0" cannot be matched as the default "$gdb_prompt $"
+# string from gdb_test_multiple could match earlier.
+
+send "\r"
+set test "more finish for 04"
+gdb_test "" "\rsymbol_04_length_40_____________________.*$gdb_prompt "
+
+gdb_test "foo" {No symbol "symbol_0foo" in current context\.} "abort more message"
+
+set cmd "p symbol_"
+send "$cmd\t"
+set test "bell for ask message"
+gdb_test """$cmd\007" 
+
+send "\t"
+set test "ask message"
+gdb_test "" "^\r\nDisplay all 5 possibilities\\? \\(y or n\\)" 
+
+send "y"
+set test "ask message for 01 and 02"
+gdb_test "" "^\r\nsymbol_01_length_40_____________________\r\nsymbol_02_length_40_____________________\r\n--More--" 
+
+# There get some VT100 characters printed.
+# See the "$gdb_prompt " match like in "more finish for 04".
+
+send "n"
+set test "ask message no"
+gdb_test "" "\r$gdb_prompt" 
+
+gdb_test "foo" {No symbol "symbol_foo" in current context\.} "abort ask message"
+exit $GRET
+
+interact

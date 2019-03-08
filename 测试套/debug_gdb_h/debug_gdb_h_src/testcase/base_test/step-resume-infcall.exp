@@ -1,0 +1,87 @@
+#!/usr/bin/expect -f
+
+# Copyright (C) 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global gdb_prompt
+global target_ip 
+global target_prompt 
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+	}
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+
+set testfile "step-resume-infcall"
+gdb_test "'$GDB_TOOL_DIR'gdb step-resume-infcall" "$GDBPROMPT"
+
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile}] } {
+#    return -1
+#}
+
+if ![runto_main] {
+    return -1
+}
+
+gdb_test "step" " in-func .*"
+gdb_test "up" " call-func .*"
+#gdb_test_no_output "set $b=$pc"
+
+if ![runto_main] {
+    return -1
+}
+
+#gdb_breakpoint {*$b if cond ()}
+gdb_breakpoint "if cond ()"
+
+set test {print $bpnum}
+send "$test\n" 
+	expect {
+    -re " = \[0-9\].*$gdb_prompt" {
+	set caller_bp $expect_out(1,string)
+    }
+}
+
+# Debug only:
+gdb_test "disass/m" ".*"
+gdb_test "info breakpoints" "reakpoint.*"
+
+#gdb_test "next" "Breakpoint , .* call-func .*"
+gdb_test "next" "cond*" ""
+
+# `cond-hit' is now hit twice; but it may not be in the future.  It is
+# currently not a bug so it is not KFAILed.
+gdb_test "p cond_hit" "=*"
+
+exit $GRET
+interact

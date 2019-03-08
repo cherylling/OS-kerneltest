@@ -1,0 +1,58 @@
+From 9dcbf4c27298724ff6a11473026bcc53c0543f4a Mon Sep 17 00:00:00 2001
+From: t00202229 <t00202229@notesmail.huawei.com>
+Date: Mon, 12 Sep 2016 01:02:38 +0000
+Subject: [PATCH] test
+
+---
+ kernel/time/time.c | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/kernel/time/time.c b/kernel/time/time.c
+index 2c85b77..b9c14e2 100644
+--- a/kernel/time/time.c
++++ b/kernel/time/time.c
+@@ -160,11 +160,41 @@ static inline void warp_clock(void)
+  * various programs will get confused when the clock gets warped.
+  */
+ 
++void funca(void)
++{
++       printk("livepatch CI testcase for add funca test\n");
++}
++
++void funcb(void)
++{
++       funca();
++       printk("livepatch CI testcase for add funcb test\n");
++}
++
++// test03: EXPORT_SYMBOL
++void funcc(void)
++{
++	printk("livepatch CI testcase for EXPORT_SYMBOL\n");
++}
++EXPORT_SYMBOL(funcc);
++
+ int do_sys_settimeofday(const struct timespec *tv, const struct timezone *tz)
+ {
+ 	static int firsttime = 1;
+ 	int error = 0;
+ 
++	/* for livepatch CI testcases */
++
++	// test01: add functions
++	funcb();
++
++	// test02: modify the var
++	error = 1;
++	if(error == 1) {
++		printk("livepatch CI testcase for modifing the var\n");
++	}
++	error = 0;
++
+ 	if (tv && !timespec_valid(tv))
+ 		return -EINVAL;
+ 
+-- 
+1.8.3.4
+

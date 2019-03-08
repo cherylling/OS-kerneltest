@@ -1,0 +1,13 @@
+#!/bin/bash
+
+kill_proc(){
+	ps -eo pid,comm | grep $1
+	if [ $? -eq 0 ];then
+		for i in `seq 20`
+		do
+			kill -9 $1
+			ps -eo pid,comm | grep $1
+			[ $? -ne 0 ] && break
+		done
+	fi
+}

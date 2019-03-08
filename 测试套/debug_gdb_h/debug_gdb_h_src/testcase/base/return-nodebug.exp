@@ -1,0 +1,110 @@
+#!/usr/bin/expect -f 
+# Copyright (C) 2009-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+
+proc do_test {type} {
+    global gdb_prompt
+    set typenospace [string map {{ } -} $type]
+
+#    global pf_prefix
+#    set old_prefix $pf_prefix
+#    lappend pf_prefix "$typenospace:"
+
+	# Verify that we do not crash when using "return" from a function with
+	# no debugging info.  Such function has no `struct symbol'.  It may
+	# still have an associated `struct minimal_symbol'.
+
+    gdb_test "b func" "reakpoint 1 at .*$gdb_prompt"
+    gdb_test "run " "func.*$gdb_prompt"
+    gdb_test "return -1" \
+	 "Return value type not available for selected stack frame\\.\r\nPlease use an explicit cast of the value to return\\." \
+	 "return from function with no debug info without a cast"
+
+	# Cast of the result to the proper width must be done explicitely.
+	gdb_test "return ($type) -1" "Make selected stack frame return now\\? \\(y or n\\) "	
+    gdb_test "y" "$gdb_prompt"
+
+	gdb_test "advance marker" "marker \\(.*" \
+		 "advance to marker"
+
+	# And if it returned the full width of the result.
+	gdb_test "print /d t" " = -1" "full width of the returned result"
+
+    gdb_exit
+#    set pf_prefix $old_prefix
+}
+
+foreach type {{signed char} {short} {int} {long} {long long}} {
+    set typeesc [string map {{ } {\ }} $type]
+    set typenospace [string map {{ } -} $type]
+
+    set testfile "return-nodebug"
+    set srcfile ${testfile}.c
+    set srcfile1 ${testfile}1.c
+    set binfile ${testfile}-${typenospace}
+
+    set additional_flags "additional_flags=-DTYPE=$typeesc"
+
+#    send_user "additional_flags = $additional_flags \n"
+#    send_user "typenospace = $typenospace \n"
+#    if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}0.o" object [list debug $additional_flags]] != "" } {
+#	continue
+#    }
+
+    # This one is compiled without debug info.
+#    if { [gdb_compile "${srcdir}/${subdir}/${srcfile1}" "${binfile}1.o" object [list $additional_flags]] != "" } {
+#	continue
+#    }
+
+#    if { [gdb_compile "${binfile}0.o ${binfile}1.o" "${binfile}" executable {debug}] != "" } {
+#	continue
+#    }
+
+#    gdb_exit
+#    gdb_start
+#    gdb_reinitialize_dir $srcdir/$subdir
+#    gdb_load ${binfile}
+    gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+    do_test $type
+}
+exit $GRET
+
+interact

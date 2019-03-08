@@ -1,0 +1,84 @@
+#!/usr/bin/expect -f 
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file is part of the gdb testsuite.
+
+# Test loading of line number information with relative path in #line,
+# PR symtab/9465.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+# srcfile is in objdir because we need to machine generate it in order
+# to get the correct path in the #line directive.
+
+set testfile "hashline3"
+set srcfile "${testfile}.c"
+set binfile "${testfile}"
+
+#set fd [open ${objdir}/${subdir}/${srcfile} w]
+#puts $fd "#line 2 \"./${subdir}/${srcfile}\""
+#puts $fd "int main () { return 0; } /* set breakpoint here */"
+#close $fd
+
+#if { [gdb_compile "${objdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested hashline3.exp
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+
+set bp_location [gdb_get_line_number "set breakpoint here" hashline/hashline_sub/${srcfile}]
+
+# Try to set a breakpoint on the specified file location.
+
+gdb_test "break $srcfile:$bp_location" \
+    "Breakpoint.*at.* file .*$srcfile, line.*" \
+    "set breakpoint"
+exit $GRET
+
+interact

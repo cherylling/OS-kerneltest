@@ -1,0 +1,121 @@
+#!/bin/bash
+######################################################################
+# @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.  
+# @File name: configure
+# @Author1:star<yexinxin@huawei.com> ID:00197803
+# @Date: 2013-04-17
+# @Description: RATF will exec this file before compile
+######################################################################
+
+top_src=${PWD}
+
+# RATF will run configure like:
+# ./configure cross_compile=$CROSS_COMPILE --host=$HOST_TARGET --target=$HOST_TARGET --prefix=$INSTALL_DIR
+# now get the value
+for ac_option
+do
+    case ${ac_option} in
+        *=?*) ac_optarg=`expr "X${ac_option}" : '[^=]*=\(.*\)'` ;;
+        *=)   ac_optarg= ;;
+        *)    ac_optarg=yes ;;
+    esac
+    case ${ac_option} in
+        --host=*)
+        host_alias=${ac_optarg} ;;
+
+        --prefix=*)
+        prefix=${ac_optarg} ;;
+        *)
+        ;;
+    esac
+done
+
+#The value of host_alias is from ${HOST} by RATF(see ../config/)
+case "X${host_alias}" in
+    "X")
+    CC="gcc" 
+    AR="ar"
+    ;;
+    *)
+    CC="${host_alias}-gcc" 
+    AR="${host_alias}-ar"
+    ;;
+esac
+
+cat >mk/config.mk << EOF
+######################################################################
+# @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.  
+# @File name: config.mk
+# @What you can do: 
+#     1.If you want to install some files to other directories
+#       (not TOOL_BIN_DIR), plz add a parameter here via modifying configure,
+#       then use it in your Makefile. Like TOOL_MOD_DIR
+#     2.If you want to add any other parameters which depends on the
+#       tool-chain, plz get the value via configure and add them here,
+#       then use them in your Makefile. Like AR
+#     3.If you want to add some parameters that already have values,
+#       plz add them to env_post.mk. Like CFLAGS
+######################################################################
+TOP_SRC         := ${top_src}
+TOOL_BIN_DIR    := ${TOOL_BIN_DIR}
+CC              := ${CC}
+AR              := ${AR}
+#directory to install kos
+TOOL_MOD_DIR    := ${TOOL_BIN_DIR}/../modules
+EOF
+
+KERNEL_CROSS_COMPILE=${CROSS_COMPILE}
+case ${CROSS_COMPILE} in
+    #parc use x86_64-dl-linux-gnu- to make a program in kernel
+    "x86_32-dl-linux-gnu-")
+    KERNEL_CROSS_COMPILE=x86_64-dl-linux-gnu-
+    ;;
+    "x86_32-rtos-linux-gnu-")
+    KERNEL_CROSS_COMPILE=x86_64-rtos-linux-gnu-
+    ;;
+esac
+cat >mk/kernel.mk << EOF
+######################################################################
+# @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.  
+# @File name: kernel.mk
+# @What you can do: 
+#     1.These parameters are used in Makefile to make modules.
+#       You can add anyother parameters if you need....
+######################################################################
+KERNEL_DIR      := ${KERNEL_DIR}
+ARCH            := ${ARCH}
+#CROSS_COMPILE   := ${CROSS_COMPILE_MOD}
+CC:= ${CROSS_COMPILE}gcc
+AR:= ${CROSS_COMPILE}ar
+EOF
+
+#do make test, if failed exit
+mkdir tmp
+cd tmp
+cat >test.c<< EOF
+#include <stdio.h>
+int main()
+{
+    return 0;
+}
+EOF
+
+cat >Makefile<< EOF
+include ${top_src}/mk/config.mk
+test:test.c
+	\$(CC) -MT \$@ -MD -MP -MF test.Tpo -o \$@ \$<
+EOF
+make
+if [ 0 -ne 0 ];then
+    echo "make test.c failed"
+    exit 1
+fi
+cd ${top_src}
+rm -rf tmp
+######################################################################
+# @What you can do:
+#     1.put patches to the source files
+#     2.cp config file to anywhere you like
+#     3.notice: this is just a shell script. You can do anyother
+#       things you want to
+######################################################################

@@ -1,0 +1,166 @@
+#!/usr/bin/expect -f
+# Copyright 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# The problem was due to amd64_skip_prologue attempting to access inferior
+# memory before the PIE (Position Independent Executable) gets relocated.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "pie-execl1"
+set srcfile pie-execl.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set testfile "pie-execl"
+#set srcfile ${testfile}.c
+set executable1 pie-execl1
+set executable2 pie-execl2
+set binfile1 $executable1
+set binfile2 $executable2
+set binfile2_test_msg ${executable2}
+
+# Use conditional compilation according to `BIN' as GDB remembers the source
+# file name of the breakpoint.
+
+#set opts [list debug additional_flags=-fPIE ldflags=-pie]
+#if {[build_executable ${testfile}.exp $executable1 $srcfile [concat $opts {additional_flags=-DBIN=1}]] == ""
+#    || [build_executable ${testfile}.exp $executable2 $srcfile [concat $opts {additional_flags=-DBIN=2}]] == ""} {
+#    return -1
+#}
+
+#clean_restart ${executable1}
+
+gdb_test_no_output "set args ${binfile2}" "set args ${binfile2_test_msg}"
+
+#if ![runto_main] {
+#    return -1
+#}
+
+gdb_test "b main" ""
+gdb_test "c" ""
+
+# Do not stop on `main' after re-exec.
+delete_breakpoints
+
+gdb_breakpoint "pie_execl_marker"
+gdb_test "info breakpoints" ".*" ""
+
+set addr1 ""
+set test "pie_execl_marker address first"
+send "p/x &pie_execl_marker\n"
+expect {
+    -re " = (0x\[0-9a-f\]+).*$gdb_prompt" {
+	set addr1 $expect_out(1,string)
+	pass $test
+    }
+}
+#verbose -log "addr1 is $addr1"
+
+set test "continue"
+send "$test\n"
+expect {
+    -re "Error in re-setting breakpoint" {
+	fail $test
+    }
+    -re "Cannot access memory" {
+	fail $test
+    }
+#    -re "pie-execl: re-exec.*executing new program.*\r\nBreakpoint \[0-9\]+,\[^\r\n\]* pie_execl_marker .*$gdb_prompt" 
+    -re "Breakpoint \[0-9\]+,\[^\r\n\]* pie_execl_marker .*$gdb_prompt" {
+	pass $test
+    }
+    timeout {
+        fail "timeout c" 
+    }
+}
+
+gdb_test "info breakpoints" ".*" ""
+
+set addr2 ""
+set test "pie_execl_marker address second"
+send "p/x &pie_execl_marker\n"
+expect {
+    -re " = (0x\[0-9a-f\]+).*$gdb_prompt" {
+	set addr2 $expect_out(1,string)
+	pass $test
+    }
+}
+#verbose -log "addr2 is $addr2"
+
+# Ensure we cannot get a false PASS and the inferior has really changed.
+set test "pie_execl_marker address has changed"
+if [string equal $addr1 $addr2] {
+    fail $test
+} else {
+    pass $test
+}
+
+gdb_exit
+exit $GRET
+
+interact

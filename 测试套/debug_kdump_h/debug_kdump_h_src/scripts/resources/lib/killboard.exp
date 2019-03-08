@@ -1,0 +1,11 @@
+#!/usr/bin/expect -f
+
+set boardname [lindex $argv 0 ]
+set timeout 5
+
+spawn killboard $boardname
+expect "Username*"
+send "l00194794\r";
+expect "*assword*" 
+send "l00194794\r"; 
+expect eof

@@ -1,0 +1,65 @@
+#!/usr/bin/expect -f 
+# Copyright (C) 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if { [prepare_for_testing ui-redirect.exp ui-redirect start.c] } {
+#    return -1
+#}
+
+gdb_test "'$GDB_TOOL_DIR'gdb ui-redirect" "$gdb_prompt"
+gdb_breakpoint main
+
+set test "commands"
+gdb_test "$test" "End with a line saying just \"end\"\..*>$"
+
+set test "print 1"
+gdb_test "$test" ".*>$" 
+
+gdb_test_no_output "end"
+
+gdb_test_no_output "set logging file /dev/null"
+gdb_test "set logging on" "Copying output to /dev/null\\."
+gdb_test "save breakpoints /dev/null" "Saved to file '/dev/null'\\."
+gdb_test "set logging off" "Done logging to /dev/null\\."
+gdb_test "help" "List of classes of commands:.*"
+exit $GRET
+
+interact

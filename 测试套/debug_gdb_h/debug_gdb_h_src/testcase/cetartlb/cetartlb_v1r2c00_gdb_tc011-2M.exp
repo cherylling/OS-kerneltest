@@ -1,0 +1,83 @@
+#!/usr/bin/expect -f 
+
+source ../lib/gdb_proc.exp
+source conf.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global RTLB_ADDR
+global FUNC_TEST_SIZE
+global RTLB_DEV_2M RTLB_DEV_1G 
+set RTLB_DEV "/dev/cetatlb2M"
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cetartlb"
+gdb_test "cd /tmp/for_gdb_test/cetartlb" "$target_prompt"
+
+set testfile cetartlb_v1r2c00_gdb_tc011
+set srcfile ${testfile}.c
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+
+gdb_test "b main" "reakpoint 1 at .* $srcfile.*$gdb_prompt"
+gdb_test "r $RTLB_DEV $RTLB_ADDR $FUNC_TEST_SIZE" "Breakpoint 1, main .* at $srcfile.*if\\(argc != 4\\).*$gdb_prompt"
+gdb_test "b 95" "Breakpoint 2 at .* file $srcfile.*$gdb_prompt"
+gdb_test "c" "Breakpoint 2, main .* at $srcfile:.*$gdb_prompt"
+
+send "p mmap_addr\n"
+expect {
+    -re "Address .* out of bounds" {
+        tst_fail "read addr error"
+    }
+    -re "= .*$gdb_prompt" {
+        tst_pass "read addr pass"
+    }
+    timeout {
+        tst_fail "timeout p mmap_addr"
+    }
+}
+
+gdb_test "set mmap_addr\[0\]=0" "Cannot access memory at address .*$gdb_prompt"
+
+gdb_test "b 107" "Breakpoint 3 at .* file $srcfile.*$gdb_prompt"
+gdb_test "c" ""
+
+send "p mmap_addr\n"
+expect {
+    -re "Address .* out of bounds" {
+        tst_fail "read addr error after mprotect"
+    }
+    -re "= .*$gdb_prompt" {
+        tst_pass "read addr pass after mprotect"
+    }
+    timeout {
+        tst_fail "timeout p mmap_addr after mprotect"
+    }
+}
+
+gdb_test "set mmap_addr\[0\]=0" "Cannot access memory at address .*$gdb_prompt"
+
+gdb_test "n" "Program received signal SIGSEGV, Segmentation fault.*"
+
+gdb_exit
+exit $GRET
+
+interact

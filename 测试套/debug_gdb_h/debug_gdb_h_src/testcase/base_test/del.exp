@@ -1,0 +1,89 @@
+#!/usr/bin/expect -f
+# Copyright 2006-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# The intent of this testcase is to verify that various aliases and
+# shortcuts of the "delete" command never stop working.
+
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip 
+global  target_prompt 
+
+spawn ssh root@$target_ip
+
+expect {
+    -timeout 2
+        -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+        }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+            set GRET [expr $GRET + 1]
+    }   
+}
+
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt*"
+gdb_test "'$GDB_TOOL_DIR'gdb del" "$GDBPROMPT"
+#gdb_test "b main" "$GDBPROMPT"
+#gdb_test "r" "return 0;.*$GDBPROMPT"
+
+# A function to test that ALIAS is working as a shortcut of the "delete"
+# command.
+set srcfile del.c
+
+proc test_delete_alias { alias } {
+    global srcfile
+    global GDBPROMPT
+    # First of all, remove all previous breakpoints if there were any,
+    # and then verify that we do not have any breakpoint lying around.
+    gdb_test "delete" \
+                "$GDBPROMPT" \
+             "Remove all breakpoints ($alias)"
+
+    gdb_test "info break" \
+             "No breakpoints or watchpoints." \
+             "info break after removing break on main"
+
+    
+    # Now, insert a breakpoint at an easy location, and then remove it
+    # using $alias. We verified that the removal worked by checking
+    # the list of breakpoints.
+    gdb_test "break main" \
+             "Breakpoint.*at.* file .*$srcfile, line.*" \
+             "breakpoint insertion ($alias)"
+    
+    gdb_test "$alias \$bpnum" \
+              "$GDBPROMPT" \
+             "Remove last breakpoint ($alias)"
+    
+    gdb_test "info break" \
+             "No breakpoints or watchpoints." \
+             "info break after removing break on main ($alias)"
+}
+
+# Test various shortcut forms of the "delete" command.
+
+test_delete_alias "del"
+test_delete_alias "d"
+
+exit $GRET
+
+interact

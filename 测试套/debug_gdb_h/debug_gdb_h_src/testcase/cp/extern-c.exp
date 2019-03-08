@@ -1,0 +1,82 @@
+#!/usr/bin/expect -f 
+# Copyright 2009-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test breakpoints on extern "C" functions implemented in C++.
+
+#if { [skip_cplus_tests] } { continue }
+
+set testfile "extern-c"
+set srcfile ${testfile}.cc
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug c++}] != "" } {
+#     untested extern-c.exp
+#     return -1
+#}
+
+# Start with a fresh gdb
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+runto_main
+
+if { [gdb_breakpoint "c_func"] == 1 } {
+#    pass "setting breakpoint at c_func"
+}
+gdb_continue_to_breakpoint "c_func" ".*c_func.*"
+
+gdb_test_no_output "set \$counter = 0" "initialize counter"
+
+gdb_test "rbreak c_funcs" \
+    "Breakpoint.* at .*c_funcs_1.*Breakpoint.* at .*c_funcs_2.*"
+
+# Test that "commands" without an argument puts commands on both
+# breakpoints.
+gdb_test "commands" "Type commands for breakpoint.* 3-4, one per line.*End with a line saying just \"end\".*"
+gdb_test "set \$counter = \$counter + 1\nend" "$gdb_prompt" 
+
+gdb_continue_to_breakpoint "c_funcs_1" ".*c_funcs_1.*"
+gdb_test "print \$counter" " = 1" "verify counter at first breakpoint"
+gdb_continue_to_breakpoint "c_funcs_2" ".*c_funcs_2.*"
+gdb_test "print \$counter" " = 2" "verify counter at second breakpoint"
+exit $GRET
+
+interact

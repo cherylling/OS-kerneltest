@@ -1,0 +1,22 @@
+#!/bin/sh
+#you must source hostconf first when you source testconf if you are in host machine,TARGET_INSTALL_DIR_BASE is
+#depend on it
+MY_TARGET_IP=`echo $SSH_CONNECTION | awk '{print $3}'` > /dev/null
+netcardname=`ifconfig | sed -n "\`expr \\\`ifconfig | sed -n "/${MY_TARGET_IP}/="\\\` '-' 1\`"p | awk '{print $1}'`
+
+TESTSUITE_NAME=docker_cli_perf_h
+
+if [ -f ../../../conf/hostconf ]
+then
+
+    cloudran_report_path=`grep "^DOCKER_RESULT" ../../../conf/hostconf | head -n 1`
+    cloudran_report_path=${cloudran_report_path#*=}
+    cloudran_report_path=../../${cloudran_report_path}
+    cloudran_report_dir=${cloudran_report_path%\/}
+    cloudran_report_dir=${cloudran_report_dir%\/*}
+    mkdir -p $cloudran_report_dir
+
+fi
+NSECS_OVERHEAD=45
+NSECS_RESOLUTION=1
+OPTS="-E -L -W -O $NSECS_OVERHEAD -R $NSECS_RESOLUTION -C 200 -D 20000 -X 25000 "

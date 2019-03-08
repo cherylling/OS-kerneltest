@@ -1,0 +1,171 @@
+#!/usr/bin/expect -f
+# Copyright 1998-1999, 2001, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Elena Zannoni (ezannoni@cygnus.com)
+# Rewritten to use gdb_test by Michael Chastain (chastain@redhat.com)
+
+# This file is part of the gdb testsuite
+#
+# tests for correctness of arithmetic operators, associativity and precedence
+# with integer type variables
+# 
+
+#
+# test running programs
+#
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "advance"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+set testfile "int-type"
+set srcfile ${testfile}.c
+set binfile ${objdir}/${subdir}/${testfile}
+
+if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug nowarnings}] != "" } {
+     untested arithmet.exp
+     return -1
+    }
+
+gdb_exit
+gdb_start
+gdb_reinitialize_dir $srcdir/$subdir
+gdb_load ${binfile}
+
+
+#
+# set it up at a breakpoint so we can play with the variable values
+#
+
+if ![runto_main] then {
+    perror "couldn't run to breakpoint"
+    continue
+}
+
+#
+# test expressions with "int" types
+#
+
+gdb_test_no_output "set variable x=14"
+gdb_test_no_output "set variable y=2"
+gdb_test_no_output "set variable z=2"
+gdb_test_no_output "set variable w=3"
+
+gdb_test "print x" "14"
+gdb_test "print y"  "2"
+gdb_test "print z"  "2"
+gdb_test "print w"  "3"
+ 
+gdb_test "print x+y" "16"
+gdb_test "print x-y" "12"
+gdb_test "print x*y" "28"
+gdb_test "print x/y"  "7"
+gdb_test "print x%y"  "0"
+
+#  x  y  z  w
+# 14  2  2  3
+
+# Test associativity of +, -, *, % ,/
+
+gdb_test "print x+y+z" "18"
+gdb_test "print x-y-z" "10"
+gdb_test "print x*y*z" "56"
+gdb_test "print x/y/z"  "3"
+gdb_test "print x%y%z"  "0"
+
+# test precedence rules on pairs of arithmetic operators
+
+gdb_test_no_output "set variable x=10"
+gdb_test_no_output "set variable y=4"
+
+#  x  y  z  w
+# 10  4  2  3
+
+gdb_test "print x+y-z" "12"
+gdb_test "print x+y*z" "18"
+gdb_test "print x+y%w" "11"
+gdb_test "print x+y/w" "11"
+gdb_test "print x-y*z"  "2"
+gdb_test "print x-y%z" "10"
+gdb_test "print x-y/z"  "8"
+gdb_test "print x*y/z" "20"
+gdb_test "print x*y%w"  "1"
+gdb_test "print x/y%w"  "2"
+
+# test use of parentheses to enforce different order of evaluation
+
+gdb_test "print x-(y+w)"  "3"
+gdb_test "print x/(y*w)"  "0"
+gdb_test "print x-(y/w)"  "9"
+gdb_test "print (x+y)*w" "42"
+exit $GRET
+
+interact

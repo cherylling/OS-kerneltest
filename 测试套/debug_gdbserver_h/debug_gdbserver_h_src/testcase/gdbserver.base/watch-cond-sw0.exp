@@ -1,0 +1,162 @@
+#!/usr/bin/expect -f
+# Copyright 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# Tests involving watchpoint conditions with local expressions.
+#
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "watch-cond"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set srcfile ${testfile}.c
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+    gdb_test_no_output "set can-use-hw-watchpoints 0" ""
+#}
+
+#if ![runto_main] then {
+#    fail "Can't run to main"
+#    return
+#}
+
+gdb_test "b main" ""
+gdb_test "c"
+
+gdb_test "watch global if q > 10" \
+    "atchpoint .*: global" \
+    "set write watchpoint on global variable, local condition"
+
+send "continue\n"
+expect {
+    -timeout 60
+    -re "Old value = 10.*New value = 11.*" {
+    }
+    timeout {
+        send_user "timeout 103\n"
+        incr GRET
+    }
+}
+
+gdb_exit
+exit $GRET
+
+interact
+#clean_restart ${testfile}
+
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+#    gdb_test_no_output "set can-use-hw-watchpoints 0" ""
+#}
+
+#if ![runto_main] then {
+#    fail "Can't run to main"
+#    return
+#}
+
+gdb_test "watch q if q > 10" \
+    "atchpoint .*: q" \
+    "set write watchpoint on local variable, local condition"
+
+gdb_test "continue" \
+    "Old value = 10.*New value = 11.*" \
+    "watchpoint with local expression, local condition evaluates in correct frame"
+
+#clean_restart ${testfile}
+
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+#    gdb_test_no_output "set can-use-hw-watchpoints 0" ""
+#}
+
+#if ![runto_main] then {
+#    fail "Can't run to main"
+#    return
+#}
+
+gdb_test "watch global2" \
+    "atchpoint.*" \
+    "set write watchpoint on global2 variable"
+
+gdb_test "continue" \
+    "Old value = 0.*New value = 1.*" \
+    "watchpoint on global2 variable triggers"
+
+gdb_test_no_output "condition 2 *foo > 10" \
+    "condition of watchpoint 2 changes"
+
+gdb_test "continue" \
+    ".*condition cannot be tested in the current scope.*Old value = 1.*New value = 2.*" \
+    "watchpoint stops with untestable local expression"
+gdb_exit
+exit $GRET
+
+interact

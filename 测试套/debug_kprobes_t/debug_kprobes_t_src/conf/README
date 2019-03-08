@@ -1,0 +1,6 @@
+NOTICE:
+1.You should only create config files in this directory.
+2.The config files should be named "${PRODUCT_NAME}_keyword.cfg".
+  eg:HERT-MPTG_mem.cfg
+3.You must know what to do in the config files.
+4.If you won't use this directory, please remove it.

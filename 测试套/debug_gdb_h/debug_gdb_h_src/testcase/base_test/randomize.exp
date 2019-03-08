@@ -1,0 +1,123 @@
+#!/usr/bin/expect -f
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#set testfile randomize
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested "Couldn't compile test program"
+#    return -1
+#}
+
+# Get things started.
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip 
+global  target_prompt 
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+            -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+                    }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+               set GRET [expr $GRET + 1]
+                                        }   
+       }
+cmd_retkey "cd $target_dir" "$target_prompt*"
+cmd_retkey "'$GDB_TOOL_DIR'gdb randomize" "$GDBPROMPT"
+
+cmd_retkey "b main" "$GDBPROMPT"
+cmd_retkey "r" "p = malloc \\(1\\);.*$GDBPROMPT"
+
+proc address_get { testname } {
+    global GDBPROMPT
+
+#    if {![runto_main]} {
+#	return -1
+#    }
+
+    # Do not rely on printf; some test configurations don't work with stdio.
+
+     send "break 27"
+ #   gdb_continue_to_breakpoint "$testname - address set"
+
+    send "print/x p\n" 
+        expect {
+	    -re "\\$\[0-9\]+ = (0x\[0-9a-f\]*).*$GDBPROMPT" {
+	    send_user "pass $testname"
+	    return $expect_out(1,string)
+	}
+    }
+}
+
+set test "set disable-randomization off"
+    send  "${test}\n" 
+    expect {
+    -re "Disabling randomization .* unsupported .*$GDBPROMPT" {
+	untested "Disabling randomization is not supported on this Linux GDB"
+	return -1
+    }
+    -re "No symbol .* in current context.*$GDBPROMPT" {
+	untested "Disabling randomization is not supported on this GDB platform"
+	return -1
+    }
+    -re "$GDBPROMPT" {
+	send_user "pass $test"
+    }
+}
+cmd_retkey "show disable-randomization"	      \
+         "Disabling randomization .* is off." \
+         "show disable-randomization off"
+
+set addr1 [address_get "randomized first address"]
+set addr2 [address_get "randomized second address"]
+set test "randomized addresses should not match"
+if [string equal $addr1 $addr2] {
+    untested "No randomization detected on this system"
+    return -1
+} else {
+    send_user "pass $test"
+}
+
+send_user "set disable-randomization on"
+cmd_retkey "show disable-randomization"	      \
+         "Disabling randomization .* is on." \
+         "show disable-randomization on"
+
+set addr1 [address_get "fixed first address"]
+set addr2 [address_get "fixed second address"]
+set test "fixed addresses should match"
+if [string equal $addr1 $addr2] {
+    send_user "pass $test"
+} else {
+    send_user "fail $test"
+}
+exit $GRET
+
+interact

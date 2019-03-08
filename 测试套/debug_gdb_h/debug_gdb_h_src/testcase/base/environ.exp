@@ -1,0 +1,230 @@
+#!/usr/bin/expect -f 
+# Copyright 1997-1999, 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#	strace $tracelevel
+#	}
+
+#global usestubs
+#
+#
+# test running programs
+#
+
+# This test exists solely to exercise the "environment" commands for
+# code-coverage on HP-UX.
+#
+#if ![istarget "hppa*-*-hpux*"] then {
+#  return
+#}
+
+set testfile "break"
+set srcfile ${testfile}.c
+set srcfile1 ${testfile}1.c
+set binfile ${testfile}
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}0.o" object {debug nowarnings}] != "" } {
+#    untested environ.exp
+#    return -1
+#}
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile1}" "${binfile}1.o" object {debug nowarnings}] != "" } {
+#    untested environ.exp
+#    return -1
+#}
+
+#if { [gdb_compile "${binfile}0.o ${binfile}1.o" "${binfile}" executable {debug nowarnings}] != "" } {
+#    untested environ.exp
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+set binfile "environ"
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+
+if ![runto_main] then { 
+send_user "fail environment command tests suppressed" 
+exit -1
+}
+
+# (No, this is not really related to the environment commands.  But it's
+# a convenient place to verify that this command works.)
+#
+gdb_test "info program" ".*Using the running image of child process \[0-9\]*.*Program stopped at 0x\[0-9a-fA-F\]*.*It stopped at breakpoint 1..*$gdb_prompt"
+
+# We don't really care where this step lands, so long as it gets
+# the inferior pushed off the breakpoint it's currently on...
+#
+gdb_test "next" ".*$gdb_prompt"
+gdb_test "info program" ".*Using the running image of child process \[0-9\]*.*Program stopped at 0x\[0-9a-fA-F\]*.*It stopped after being stepped..*$gdb_prompt"
+
+if ![runto_main] then { 
+    send_user "fail environment command tests suppressed" 
+    exit -2
+}
+
+send "delete\n"
+expect {
+  -re ".*y or n."\
+          {send "y\n"
+           expect {
+             -re ".*$gdb_prompt"\
+                     {#pass "delete breakpoint before info program"
+                     }
+             timeout {
+                send_user "(timeout) delete breakpoint before info program"
+                set GRET [expr $GRET + 1]
+                }
+           }
+          }
+  timeout {
+        send_user "(timeout) delete breakpoint before info program"
+        set GRET [expr $GRET + 1]
+  }
+}
+
+gdb_test "info program" ".*Using the running image of child process \[0-9\]*.*Program stopped at 0x\[0-9a-fA-F\]*.*It stopped at a breakpoint that has since been deleted..*$gdb_prompt"
+
+# Verify that we can show all currently-set environment variables.
+# (It's a bit hacky, but nonetheless probably safe to check for at
+# least the SHELL variable.)
+#
+# need to increase timeout because of very long output
+#set oldtimeout $timeout
+#set timeout [expr "$timeout + 300"]
+
+gdb_test "show environment" ".*SHELL=.*"
+send "\n"
+send "\n"
+#set timeout $oldtimeout
+
+# Verify that we can unset a specific environment variable.
+#
+gdb_test "unset environment EDITOR" "$gdb_prompt"
+gdb_test "show environment EDITOR"  "Environment variable \"EDITOR\" not defined.*$gdb_prompt"
+
+# Verify that we can unset all environment variables.
+#
+send "unset environment\n"
+expect {
+  -re "Delete all environment variables.*y or n."\
+          {send "y\n"
+           expect {
+             -re "$gdb_prompt"\
+                     {
+                     #pass "unset entire environment"
+                     }
+             timeout {
+                send_user "(timeout) unset entire environment"
+                set GRET [expr $GRET + 1]
+                }
+           }
+          }
+  timeout {
+        send_user "(timeout) unset entire environment"
+        set GRET [expr $GRET + 1]
+  }
+}
+
+# Verify that we can set a specific environment variable.
+#
+gdb_test "set environment EDITOR emacs"  "$gdb_prompt"
+gdb_test "show environment EDITOR" "EDITOR = emacs.*$gdb_prompt"
+
+# Verify that GDB responds gracefully to a request to set environment,
+# with no variable name.
+#
+gdb_test "set environment" "Argument required .environment variable and value..*$gdb_prompt"
+
+# I'm not sure just what GDB has in mind in explicitly checking
+# for this variant, but since GDB handles it, test it.
+#
+gdb_test "set environment =" "Argument required .environment variable to set..*$gdb_prompt"
+
+# Setting an environment variable without a value sets it to a NULL
+# value.
+#
+gdb_test "set environment EDITOR" "Setting environment variable \"EDITOR\" to null value..*$gdb_prompt"
+gdb_test "show environment EDITOR" "EDITOR = .*$gdb_prompt"
+
+# Verify that GDB responds gracefully to an attempt to show a
+# non-existent environment variable.  (We hope this variable is
+# undefined!)
+#
+gdb_test "show environment FOOBARBAZGRUNGESPAZBALL" "Environment variable \"FOOBARBAZGRUNGESPAZBALL\" not defined..*$gdb_prompt"
+
+# Verify that GDB can set an environment variable hitherto undefined.
+#
+gdb_test "set environment FOOBARBAZGRUNGESPAZBALL t" "$gdb_prompt"
+gdb_test "show environment FOOBARBAZGRUNGESPAZBALL" "FOOBARBAZGRUNGESPAZBALL = t.*$gdb_prompt"
+
+# Verify that GDB can also set an environment variable using the "="
+# syntax.
+#
+gdb_test "set environment FOOBARBAZGRUNGESPAZBALL = t" "$gdb_prompt"
+gdb_test "show environment FOOBARBAZGRUNGESPAZBALL" "FOOBARBAZGRUNGESPAZBALL = t.*$gdb_prompt"
+
+# Verify that GDB can set an environment variable to a value that has
+# an embedded (trailing, in this case) equals.
+#
+gdb_test "set environment FOOBARBAZGRUNGESPAZBALL t=" "$gdb_prompt"
+gdb_test "show environment FOOBARBAZGRUNGESPAZBALL"  "FOOBARBAZGRUNGESPAZBALL = t=.*$gdb_prompt"
+
+# Verify that GDB can set an environment variable to a value preceded
+# by whitespace, and that such whitespace is ignored (not included
+# in the set value).
+#
+gdb_test "set environment FOOBARBAZGRUNGESPAZBALL =     foo" "$gdb_prompt"
+gdb_test "show environment FOOBARBAZGRUNGESPAZBALL" "FOOBARBAZGRUNGESPAZBALL = foo.*$gdb_prompt"
+
+# Verify that GDB can manipulate the distinguished PATH variable.
+#
+gdb_test "path /tmp/FOOBARBAZGRUNGESPAZBALL" ".*Executable and object file path: /tmp/FOOBARBAZGRUNGESPAZBALL.*$gdb_prompt"
+gdb_test "show paths" "Executable and object file path: /tmp/FOOBARBAZGRUNGESPAZBALL.*$gdb_prompt"
+
+gdb_exit
+exit $GRET
+
+interact

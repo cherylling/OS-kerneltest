@@ -1,0 +1,129 @@
+#!/usr/bin/expect -f
+
+# Copyright 2004, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+# The program siginfo.c creates a backtrace containing a signal
+# handler registered using sigaction's sa_sigaction / SA_SIGINFO.
+# Some OS's (e.g., GNU/Linux) use different signal trampolines for
+# sa_sigaction and sa_handler.
+
+# This test first confirms that GDB can backtrace through the
+# alternative sa_sigaction signal handler, and second that GDB can
+# nexti/stepi out of such a handler.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+	-timeout 2
+	-re "$target_prompt*" {}
+	timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+	}
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+#if [target_info exists gdb,nosignals] {
+#    verbose "Skipping signals.exp because of nosignals."
+#    continue
+#}
+
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+
+set testfile siginfo
+set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested "Couldn't compile ${srcfile}.c"
+#    return -1
+#}
+
+# get things started
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT"
+
+gdb_test "display/i \$pc"
+
+# Advance to main
+if { ![runto_main] } then {
+    gdb_suppress_tests;
+}
+
+# Pass all the alarms straight through (but verbosely)
+# gdb_test "handle SIGALRM print pass nostop"
+# gdb_test "handle SIGVTALRM print pass nostop"
+# gdb_test "handle SIGPROF print pass nostop"
+
+# Run to the signal handler, validate the backtrace.
+gdb_test "break handler"
+gdb_test "continue" ".* handler .*" "continue to stepi handler"
+gdb_test "bt" "0.*handler.*1.*signal handler called.*2.*main"
+
+# Check that GDB can step the inferior back to main
+set test "step out of handler"
+send "step\n" 
+    expect {
+    -re "Could not insert single-step breakpoint.*$GDBPROMPT" {
+	#setup_kfail gdb/1736 sparc*-*-openbsd*
+	#send_user "fail $test (could not insert single-step breakpoint)"
+    set GRET [expr $GRET + 1]
+    }
+    -re "done = 1;.*${gdb_prompt} $" {
+	send "$i\n"
+	exp_continue
+    }
+    -re "handler .*${gdb_prompt}" {
+	send "step\n"
+	exp_continue
+    }
+    -re "$inferior_exited_re normally.*$GDBPROMPT" {
+	#kfail gdb/1613 "$test (program exited)"
+    set GRET [expr $GRET + 1]
+    }
+    -re "(while ..done|return 0).*$GDBPROMPT" {
+	# After stepping out of a function /r signal-handler, GDB will
+	# advance the inferior until it is at the first instruction of
+	# a code-line.  While typically things return to the middle of
+	# the "while..." (and hence GDB advances the inferior to the
+	# "return..." line) it is also possible for the return to land
+	# on the first instruction of "while...".  Accept both cases.
+    }
+}
+
+exit $GRET
+interact
+

@@ -1,0 +1,105 @@
+#!/usr/bin/expect -f
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT             
+global gdp_prompt
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}   
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt" ""
+
+#
+# Tests involving watchpoint conditions with local expressions.
+#
+
+set testfile "watch-cond"
+set srcfile ${testfile}.c
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT*" ""
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile} ${srcfile}] } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+#    gdb_test_no_output "set can-use-hw-watchpoints 0" ""
+#    gdb_test "set can-use-hw-watchpoints 0" "$GDBPROMPT*"
+#}
+
+if ![runto main] then {
+    puts "Can't run to main"
+    return
+}
+
+gdb_test "watch global if q > 10" \
+    "atchpoint .*: global" \
+    "set write watchpoint on global variable, local condition"
+
+gdb_test "continue" \
+    "Old value = 10.*New value = 11.*" \
+    "watchpoint with global expression, local condition evaluates in correct frame"
+
+#clean_restart ${testfile}
+
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+#    gdb_test_no_output "set can-use-hw-watchpoints 0" ""
+#}
+
+if ![runto main] then {
+    tst_fail "Can't run to main"
+    return
+}
+
+gdb_test "watch q if q > 10" \
+    "atchpoint .*: q" \
+    "set write watchpoint on local variable, local condition"
+
+gdb_test "continue" \
+    "Old value = 10.*New value = 11.*" \
+    "watchpoint with local expression, local condition evaluates in correct frame"
+
+#clean_restart ${testfile}
+
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+#    gdb_test_no_output "set can-use-hw-watchpoints 0" ""
+#}
+
+if ![runto main] then {
+    tst_fail "Can't run to main"
+    return
+}
+
+gdb_test "watch global2" \
+    "atchpoint.*" \
+    "set write watchpoint on global2 variable"
+
+gdb_test "continue" \
+    "Old value = 0.*New value = 1.*" \
+    "watchpoint on global2 variable triggers"
+
+gdb_test "condition 2 *foo > 10" "$GDBPROMPT*" 
+
+gdb_test "continue" "Old value = 1.*New value = 2.*" \
+    "watchpoint stops with untestable local expression"
+
+exit $GRET
+interact

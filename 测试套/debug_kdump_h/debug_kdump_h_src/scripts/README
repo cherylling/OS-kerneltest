@@ -1,0 +1,115 @@
+==========================================
+semi-automatic testing framework for kdump
+==========================================
+
+Overview
+========
+
+Currently, the process of manually running a testcase is as follows:
+
+1. prepare image,rootfs,dtb of both first kernel and capture kernel
+2. deploy the board, template: "deploy -t $BOARD_NAME -u $APPLYBOARD_USER -f $rootfs,$uImage,$dtb"
+** deploy server "10.67.189.100" is for Shenzhen boards, and "10.175.101.84" for Hangzhou board.
+3. kexec -p to load capture kernel
+4. trigger panic or oops to reboot into the second kernel
+5. use makedumpfile to dump vmcore, and scp vmcore
+6. reboot to first kernel, use crash to analyze the vmcore
+
+This framework is designed to run above steps 2~6 automatically.
+
+Basic structure and purpose of the catalog:
+.
+????EUR arm          # automatic scripts to run testcases
+????EUR config       # constant variables used by automatic scripts
+????EUR README
+????EUR resources
+    ????EUR applyboard_deploy  # deploy tools, special for Hangzhou boards
+    ????EUR capture_kernel     # for kexec loading capture kernel, contains Image/zImage, rootfs and dtb
+    ????EUR first_kernel       # for deploy tools to start first kernel
+    ????EUR lib                # script libs used by automatic scripts
+    ????EUR test_modules       # ko files used by testcases to trigger panic or oops, 
+
+So far, it works on platform of arm64be(hi1382), arm64le(hi1213) and arm32be(hi1380/hi1391)
+
+In addtion, hi1382 and hi1381 use Hangzhou boards, hi1380 and hi1213 use Shenzhen boards.
+
+As deploy tools work differently between Shenzhen and Hangzhou, so will the steps of runing this framework be
+
+
+Precondition
+============
+
+For Hi1213/Hi1380, which use Shenzhen board, please run this framework on "10.67.189.100"
+
+For Hi1381/Hi1382, which use Hangzhou board, please run this framework on "10.175.101.84" and use private deploy tools by
+
+1)cp -r /home/RATS/src/* resources/applyboard_deploy/
+2)cp config/deploy.conf-hangzhou resources/applyboard_deploy/deploy/deploy.conf
+
+
+Steps
+=====
+
+Prepare first_kernel, capture_kernel and test_modulese
+-----------------------------------------------------
+
+Note: deploy tools of Shenzhen will automatic config network of capture kernel while deploy tools of Hangzhou not
+
+*Hi1382 (Hangzhou board):
+
+1) scp image,rootfs,dtb of first kernel to arm64@10.175.101.84:/home/arm64-ftp/ (pwd: arm64)
+2) copy image,rootfs,dtb of capture kernel to resources/capture_kernel/arm-hi1382
+** the rootfs should contain automatic netork config.
+3) prepare the ko files and copy to resources/test_modulese/arm-hi1382
+
+*Hi1381 (Hangzhou board):
+
+1) copy image,rootfs,dtb of first kernel to 10.175.101.84:/home/ftp/
+2) copy image,rootfs,dtb of capture kernel to resources/capture_kernel/arm-hi1381
+** the rootfs should contain automatic netork config.
+3) prepare the ko files and copy to resources/test_modulese/arm-hi1381
+
+*Hi1380 (Shenzhen board):
+
+1) copy linux-bin of first kernel to resources/first_kernel/arm-hi1380
+2) copy image,rootfs,dtb of capture kernel to resources/capture_kernel/arm-hi1380
+3) prepare the ko files and copy to resources/test_modulese/arm-hi1380
+
+*Hi1212 (Shenzhen board):
+
+1) copy image,rootfs,dtb of first kernel to resources/first_kernel/arm-hi1213
+2) copy image,rootfs,dtb of capture kernel to resources/capture_kernel/arm-hi1213
+3) prepare the ko files and copy to resources/test_modulese/arm-hi1213
+
+
+Modify config file
+------------------
+
+The config is under resources/config, at most of the time, no need to update
+
+Run automatic scripts
+---------------------
+
+The automatic scripts are under arm/. e.g. hi1213
+.
+????EUR arm
+??  ????EUR hi1213
+??  ??  ????EUR kdump_kpgen.sh   # testcase used kpgen_kbox.ko to trigger panic or oops
+??  ??  ????EUR kdump_kpgens.sh  # all testcases used kpgen_kbox.ko
+??  ??  ????EUR kdump_lib.sh     # scripts libs used by other automatic scripts
+??  ??  ????EUR kdump_module.sh  # testcase used ko files to trigger panic or oops
+??  ??  ????EUR kdump_modules.sh # all testcase used ko files
+??  ??  ????EUR kdump_sysrq.sh   # testcase used "echo c > /proc/sysrq-trigger" to trigger panic
+...
+
+sh arm/hi1213/kdump_sysrq.sh > run.log.sysrq 2>&1
+
+Check result by the log.
+
+
+TODO
+====
+
+1. Because of makedumpfile or crash tools problems, currently the automatic scripts do not run makedumpfile and crash steps.
+
+2. Because hi1212(arm32le) use tftp to deploy, it is difficult to be automated

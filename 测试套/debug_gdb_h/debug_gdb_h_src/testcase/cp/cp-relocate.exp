@@ -1,0 +1,160 @@
+#!/usr/bin/expect -f 
+# Copyright 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+# Test loading symbols from unrelocated C++ object files.
+
+set testfile cp-relocate
+set srcfile ${testfile}.cc
+set binfile ${testfile}.o
+
+#if { [skip_cplus_tests] } { continue }
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" object {c++ debug}] != "" } {
+#     untested cp-relocate.exp
+#     return -1
+#}
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb " "$gdb_prompt"
+
+proc get_func_address { func } {
+    global gdb_prompt hex
+
+    set rfunc [string_to_regexp $func]
+    send "print ${func}\n"
+    expect {
+	-re "\\\$\[0-9\]+ = \\{.*\\} (0|($hex) <${rfunc}>).*${gdb_prompt}" {
+	    # $1 = {int ()} 0x24 <function_bar>
+	    # But if the function is at zero, the name may be omitted.
+#	    pass "get address of ${func}"
+	    if { $expect_out(1,string) == "0" } {
+		return "0x0"
+	    } else {
+		return $expect_out(2,string)
+	    }
+	}
+    }
+  return ""
+}
+
+# Load the file as an executable; GDB should assign non-overlapping
+# section offsets.
+gdb_test "kill"  "The program is not being run.*$gdb_prompt"
+#gdb_test "file $binfile" "Reading symbols from $target_prompt/$binfile...done..*$gdb_prompt"
+gdb_test "file $target_prompt/$binfile" "Reading symbols from $target_prompt/$binfile...done..*$gdb_prompt"
+
+# Find the interesting functions.  We go to a little effort to find
+# the right function names here, to work around PR c++/40.
+set func1_name ""
+set func2_name ""
+send "info functions func<.>\n"
+expect {
+    -re "\r\nint (\[^\r\]*func<1>\[^\r]*);" {
+	set func1_name $expect_out(1,string)
+	exp_continue
+    }
+    -re "\r\nint (\[^\r\]*func<2>\[^\r]*);" {
+	set func2_name $expect_out(1,string)
+	exp_continue
+    }
+    -re "$gdb_prompt" {
+	if { ${func1_name} != "" && ${func2_name} != "" } {
+#	    pass "info functions"
+	} else {
+#       fail "info functions"
+	    exit -1
+	}
+    }
+}
+
+# Check that all the functions have different addresses.
+set func1_addr [get_func_address "$func1_name"]
+set func2_addr [get_func_address "$func2_name"]
+set caller_addr [get_func_address "caller"]
+
+if { "${func1_addr}" == "${func2_addr}"
+     || "${func1_addr}" == "${func2_addr}"
+     || "${func2_addr}" == "${caller_addr}" } {
+   send_user "fail C++ functions have different addresses \n"
+    set GRET [expr $GRET + 1]
+} else {
+#  pass "C++ functions have different addresses"
+}
+
+# Figure out the names of the sections containing the template
+# functions.
+set func1_sec ""
+set func2_sec ""
+send "info file\n"
+sleep 3
+expect {
+    -re "($hex) - ($hex) is (\[^\r\]*)\r" {
+	if { $expect_out(1,string) <= $func1_addr
+	     && $expect_out(2,string) > $func1_addr } {
+	    set func1_sec $expect_out(3,string)
+	} elseif { $expect_out(1,string) <= $func2_addr
+	    && $expect_out(2,string) > $func2_addr } {
+	    set func2_sec $expect_out(3,string)
+	}
+	exp_continue
+    }
+}
+
+if { $func1_sec == $func2_sec } {
+#    untested "cp-relocate.exp - template functions in same sections"
+    exit -3
+}
+
+# Now start a clean GDB, for add-symbol-file tests.
+gdb_exit
+gdb_test "'$GDB_TOOL_DIR'gdb " "$gdb_prompt"
+
+gdb_test "add-symbol-file ${binfile} 0 -s ${func1_sec} 0x10000 -s ${func2_sec} 0x20000" "add symbol table from file \".*${testfile}\\.o\" at.*\\(y or n\\) " 
+gdb_test	"y" "$gdb_prompt"
+
+# Make sure the function addresses were updated.
+gdb_test "break *$func1_name" \
+    "Breakpoint $decimal at 0x1....: file .*"
+gdb_test "break *$func2_name" \
+    "Breakpoint $decimal at 0x2....: file .*"
+exit $GRET
+
+interact

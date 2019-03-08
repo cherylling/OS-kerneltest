@@ -1,0 +1,176 @@
+#!/usr/bin/expect -f
+# Copyright (C) 2011-2012 Free Software Foundation, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile readline-ask.x
+set srcfile readline-ask.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+##set executable ${testfile}.x
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${executable}
+set inputrc readline-ask.inputrc
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" object {debug}] != "" } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+# INPUTRC gets reset for the next testfile.
+setenv INPUTRC $inputrc
+#clean_restart ${executable}
+
+gdb_test_no_output "set width 50"
+gdb_test_no_output "set height 3"
+
+set cmd "p symbol_0"
+set test "bell for more message"
+gdb_test "$cmd" "$cmd\007" 
+
+send "\t"
+set test "more message for 01 and 02"
+expect {
+    -re "^\r\nsymbol_01_length_40_____________________\r\nsymbol_02_length_40_____________________\r\n--More--" {
+	pass $test
+    }
+    -re "$gdb_prompt" {
+	fail $test
+    }
+}
+
+# There get some VT100 characters printed.
+
+send "\r"
+set test "more message for 03"
+expect {
+    -re "\rsymbol_03_length_40_____________________.*--More--" {
+	pass $test
+    }
+}
+
+# "$gdb_prompt $" will not match as $cmd gets output: $gdb_prompt p symbol_0
+# And "$gdb_prompt p symbol_0" cannot be matched as the default "$gdb_prompt $"
+# string from gdb_test_multiple could match earlier.
+
+send "\r"
+set test "more finish for 04"
+expect {
+    -re "\rsymbol_04_length_40_____________________.*$gdb_prompt" {
+	pass $test
+    }
+}
+
+gdb_test "foo" {No symbol "symbol_0foo" in current context\.} "abort more message"
+
+set cmd "p symbol_"
+send "$cmd\t"
+set test "bell for ask message"
+expect {
+    -re "$cmd\007" {
+	pass $test
+    }
+}
+
+send "\t"
+set test "ask message"
+expect {
+    -re "^\r\nDisplay all 5 possibilities\\? \\(y or n\\)" {
+	pass $test
+    }
+    -re "$gdb_prompt" {
+	fail $test
+    }
+}
+
+send "y"
+set test "ask message for 01 and 02"
+expect {
+    -re "^\r\nsymbol_01_length_40_____________________\r\nsymbol_02_length_40_____________________\r\n--More--" {
+	pass $test
+    }
+}
+
+# There get some VT100 characters printed.
+# See the "$gdb_prompt " match like in "more finish for 04".
+
+send "n\n"
+set test "ask message no"
+expect {
+    -re "\r$gdb_prompt" {
+	pass $test
+    }
+}
+
+gdb_test "foo" {No symbol "symbol_foo" in current context\.} "abort ask message"
+
+gdb_exit
+exit $GRET
+
+interact

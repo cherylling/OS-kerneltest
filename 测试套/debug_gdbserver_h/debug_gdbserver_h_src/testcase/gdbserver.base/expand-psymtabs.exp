@@ -1,0 +1,128 @@
+#!/usr/bin/expect -f
+# Copyright 2007-2012 Free Software Foundation, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+# This file is part of the gdb testsuite.
+
+# It's possible to have a program that contains two compilation units
+# for the same source file name, that have code at different lines.
+# For example, in this test, we compile expand-psymtabs.c twice with
+# different preprocessor symbols #defined; the first .o only has
+# 'main' at some earlier source lines, while the second .o only has
+# 'foo' at later source lines.  So when setting breakpoints by line
+# number, which full symtab we need depends on the line number in
+# question.
+#
+# This test is meant to verify that, even with lazy partial symtab
+# reading in effect, GDB can set breakpoints by line number
+# successfully in either compilation unit.  
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile expand-psymtabs
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+#set binfile_1 ${objdir}/${subdir}/${testfile}_1.o
+#set binfile_2 ${objdir}/${subdir}/${testfile}_2.o
+
+# What compiler are we using?
+#if [get_compiler_info] {
+#    return -1
+#}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile_1}" object {debug additional_flags=-DFIRST} ] != "" } {
+#     untested expand-psymtabs.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile_2}" object {debug}] != "" } {
+#     untested expand-psymtabs.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${binfile_1} ${binfile_2}" "${binfile}" executable {debug}] != "" } {
+#     untested expand-psymtabs.exp
+#     return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+set foo_bp [gdb_get_line_number "Break here"]
+gdb_test "break $foo_bp" "Breakpoint.*" "Expand psymtabs"
+
+gdb_exit
+exit $GRET
+
+interact

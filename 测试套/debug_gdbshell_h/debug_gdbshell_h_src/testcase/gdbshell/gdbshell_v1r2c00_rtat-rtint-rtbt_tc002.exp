@@ -1,0 +1,166 @@
+#!/usr/bin/expect -f 
+#######################################################################
+##- @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.
+##- @Suitename: debug_gdbshell_h
+##- @Name: gdbshell_v1r2c00_rtat-rtint-rtbt_tc002
+##- @Author: l00191161
+##- @Date: 2013-10-17
+##- @Precon: 支持gdbshell
+##- @Brief: rtbt功能验证
+##- @Detail: 1，启动多进程多线程，
+#            2，gdbshell rtat其中某个进程，
+#            3，info thread得到该进程下线程的infier id 然后rtint中断某个线程，
+#            4，rtbt获取该线程的调用栈信息，验证信息是否正确，5，rtde并退出gdbshell
+##- @Expect: rtbt获取线程的调用栈信息正确。程序退出无异常
+##- @Level: Level 1
+##- @Auto: True
+##- @Modify:
+#######################################################################*/
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdbshell_test/gdbshell" "$target_prompt"
+global testpid
+global binfile
+set binfile thread_test
+set testpid 0
+gdb_test "killall $binfile"
+sleep 1
+gdb_test "./$binfile &" "$target_prompt"
+sleep 1
+
+send "ps -ef | grep $binfile |grep -v \"grep $binfile\"|sed -n 1p |awk '\{print \$2\}'\n"
+expect {
+    -timeout 2
+        -re "(\[0-9\]+)\r\n" {
+            set testpid $expect_out(1,string)
+        }
+    timeout {
+        send_user "fail \n"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+send_user "testpid=$testpid \n"
+
+if { $testpid == 0 } {
+     set GRET [expr $GRET + 1]
+     exit $GRET
+}
+
+set target_prompt "/tmp/for_gdbshell_test/gdbshell"
+gdb_test "'$GDB_TOOL_DIR'gdbshell" "$gdb_prompt"
+
+gdb_test "rtat $testpid" "gdbshellagent.*$gdb_prompt"
+
+gdb_test "show help" "help"
+set THREAD_NUM 0
+send "info threads\n"
+expect {
+    -timeout 5
+    -re "thread_test" {
+        incr THREAD_NUM
+        exp_continue
+    }
+    -re "gdb_prompt" {
+    }
+}
+
+gdb_test "show help" "help"
+
+send "info threads\n"
+expect {
+    -timeout 5
+    -re "gdbshellagent" {
+        incr THREAD_NUM
+        exp_continue
+    }
+    -re "gdb_prompt" {
+    }
+}
+
+if { $THREAD_NUM != 4 } {
+    send_user "threads num is $THREAD_NUM mismatch 4 while info threads"
+    set GRET [expr $GRET + 1] 
+}
+
+set bt1 0;
+set bt2 0;
+set bt3 0;
+set bt4 0;
+    
+
+for { set i 1 } { $i < 5 } { incr i } {
+    gdb_test "rtint $i" "Switching to thread $i"
+    gdb_test "info threads" "\\* $i"
+    sleep 1
+# test rtbt
+    send "rtbt\n"
+    expect {
+        -timeout 2
+        -re "#0  $hex in pthread_join.*#1  $hex in main.*" {
+            set bt1 1
+        }
+        -re "#0  ninth_floor_func .*#1  $hex in eighth_floor_func.*#2  $hex in seventh_floor_func.*#3  $hex in sixth_floor_func.*#4  $hex in fifthly_floor_func.*#5  $hex in fourthly_floor_func.*#6  $hex in third_floor_func.*#7  $hex in second_floor_func.*#8  $hex in first_floor_func.*#9  $hex in thread_f9.*#10 $hex in start_thread.*#11 $hex in clone.*#12 $hex in clone" {
+            set bt2 1
+        }
+        -re "#0  thread_start.*#1  $hex in start_thread.*#2  $hex in clone.*#3  $hex in clone" {
+            set bt3 1
+        }
+        -re "#0  $hex in gdbshell_hook_point.*#1  $hex in gdbshell_hook_thread.*#2  $hex in start_thread.*#3  $hex in clone.*#4  $hex in clone" {
+            set bt4 1
+        }
+    }
+
+    gdb_test "show pagination" "State of pagination is off."
+    set thread_stauts 0
+    send "info threads\n"
+    expect {
+        -timeout 2
+        -re "\"thread_test\" \\(running\\)" {
+            incr thread_stauts
+            exp_continue
+        }
+        -re "gdbshellagent" {
+            exp_continue
+        }
+    }
+    
+    send_user "\nthread_stauts=$thread_stauts\n"
+    if { $thread_stauts != 3 } {
+        send_user "the threads is not running after rtbt\n"
+        set GRET [expr $GRET + 1] 
+    }
+
+}
+ 
+
+gdb_test "detach" "Detaching from program:.*process $testpid"
+
+gdb_exit
+gdb_test "killall thread_test" "$target_prompt"
+sleep 1
+exit $GRET
+
+interact

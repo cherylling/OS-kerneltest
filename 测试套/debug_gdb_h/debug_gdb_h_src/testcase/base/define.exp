@@ -1,0 +1,268 @@
+#!/usr/bin/expect -f 
+# Copyright 1998-1999, 2001, 2003-2004, 2007-2012 Free Software
+# Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Elena Zannoni. (ezannoni@cygnus.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#	strace $tracelevel
+#	}
+
+#global usestubs
+
+
+#
+# test running programs
+#
+
+set testfile "break"
+set srcfile ${testfile}.c
+set srcfile1 ${testfile}1.c
+set binfile ${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}0.o" object {debug nowarnings}] != "" } {
+#     untested define.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile1}" "${binfile}1.o" object {debug nowarnings}] != "" } {
+#     untested define.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${binfile}0.o ${binfile}1.o" "${binfile}" executable {debug nowarnings}] != "" } {
+#     untested define.exp
+#     return -1
+#}
+
+set binfile "define"
+#           gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdb define" "$gdb_prompt"
+gdb_test_no_output "set height 500"
+
+set bp_location1 [gdb_get_line_number "set breakpoint 1 here"]
+set bp_location11 [gdb_get_line_number "set breakpoint 11 here"]
+
+if ![runto_main] then { 
+send_user "define tests suppressed" 
+exit -1
+}
+
+# Verify that GDB allows a user to define their very own commands.
+#
+gdb_test "define nextwhere" "Type commands for definition of \"nextwhere\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "next\nbt\nend" "$gdb_prompt" 
+
+# Verify that those commands work as gdb_expected.
+#
+gdb_test "nextwhere" \
+    "$bp_location1\[ \t\]*printf.*#0\[ \t\]*main.*:$bp_location1.*" \
+    "use user command: nextwhere"
+
+# Verify that a user can define a command whose spelling is a
+# proper substring of another user-defined command.
+#
+gdb_test "define nextwh" "Type commands for definition of \"nextwh\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "next 2\nbt\nend" "$gdb_prompt" 
+
+# Verify that a user can redefine their commands.  (Test both the
+# confirmed and unconfirmed cases.)
+#
+gdb_test "define nextwhere" \
+    "Redefine command \"nextwhere\".*y or n. $"
+#    "Command \"nextwhere\" not redefined.*" 
+#    "redefine user command aborted: nextwhere" 
+gdb_test    "n" "$gdb_prompt"
+
+send "define nextwhere\n"
+expect {
+  -re "Redefine command \"nextwhere\".*y or n."\
+          {send "y\n"
+           expect {
+             -re "Type commands for definition of \"nextwhere\".\r\nEnd with a line saying just \"end\".*>$"\
+                     {send "bt\nnext\nend\n"
+                      expect {
+                        -re "$gdb_prompt"\
+                                {
+                                #pass "redefine user command: nextwhere"
+                                }
+                        timeout {
+                        send_user "(timeout) redefine user command: nextwhere"
+                        set GRET [expr $GRET + 1]
+                        }
+                      }
+                     }
+             timeout {send_user "(timeout) redefine user command: nextwhere"
+                        set GRET [expr $GRET + 1]
+             }
+           }
+          }
+  timeout {send_user "(timeout) redefine user command: nextwhere"
+     set GRET [expr $GRET + 1]
+  }
+}
+
+# Verify that GDB gracefully handles an attempt to redefine the
+# help text for a builtin command.
+#
+gdb_test "document step" "Command \"step\" is built-in.*" \
+    "redocumenting builtin command disallowed"
+
+# Verify that a user can document their own commands.  (And redocument
+# them.)
+#
+gdb_test "document nextwhere" "Type documentation for \"nextwhere\".*End with a line saying just \"end\".*" 
+gdb_test "A next command that first shows you where you're stepping from.\nend"   "$gdb_prompt"   "document user command: nextwhere"
+
+gdb_test "document nextwhere" "Type documentation for \"nextwhere\".*End with a line saying just \"end\".*" 
+gdb_test "A next command that first shows you where you're stepping from.\nend"  "$gdb_prompt" 	    "re-document user command: nextwhere"
+
+gdb_test "help nextwhere" \
+    "A next command that first shows you where you're stepping from.*" \
+    "help user command: nextwhere"
+
+# Verify that the document command preserves whitespace in the beginning of the line.
+#
+gdb_test "document nextwhere" "Type documentation for \"nextwhere\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "   A next command that first shows you where you're stepping from.\nend"  "$gdb_prompt"   "set up whitespace in help string"
+
+gdb_test "help nextwhere" \
+    "   A next command that first shows you where you're stepping from.*" \
+    "preserve whitespace in help string"
+
+# Verify that the command parser doesn't require a space after an 'if'
+# command in a user defined function.
+#
+gdb_test "define ifnospace" "Type commands for definition of \"ifnospace\".*End with a line saying just \"end\".*" 
+gdb_test "if(3<4)\nprint \"hi there\\n\"\nend\nend"  "$gdb_prompt" "send body of ifnospace"  
+
+gdb_test "ifnospace" ".*hi there.*" "test ifnospace is parsed correctly"
+
+# Verify that the command parser doesn't require a space after an 'while'
+# command in a user defined function.
+#
+gdb_test "define whilenospace" "Type commands for definition of \"whilenospace\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "set \$i=1\nwhile(\$i<2)\nset \$i=2\nprint \"hi there\\n\"\nend\nend" "$gdb_prompt" "send body of whilenospace" 
+gdb_test "whilenospace" ".*hi there.*" "test whilenospace is parsed correctly"
+
+# Verify that the user can "hook" a builtin command.  We choose to
+# hook the "stop" pseudo command, and we'll define it to use a user-
+# define command.
+#
+gdb_test "define user-bt" "Type commands for definition of \"user-bt\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "bt\nend"  "$gdb_prompt"   "define user command: user-bt"
+
+gdb_test "define hook-stop" "Type commands for definition of \"hook-stop\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "user-b\nend"  "$gdb_prompt"    "define hook-stop command"
+
+gdb_test "next" "#0\[ \t\]*main.*:$bp_location11.*" \
+    "use hook-stop command"
+
+# Verify that GDB responds gracefully to an attempt to define a "hook
+# command" which doesn't exist.  (Test both the confirmed and unconfirmed
+# cases.)
+#
+gdb_test "define hook-bar" \
+    "warning: Your new `hook-bar' command does not hook any existing command.\r\nProceed.*y or n."
+gdb_test    "n" "$gdb_prompt"
+
+send "define hook-bar\n"
+expect {
+  -re "warning: Your new `hook-bar' command does not hook any existing command.\r\nProceed.*y or n."\
+          {send "y\n"
+           expect {
+             -re "Type commands for definition of \"hook-bar\".\r\nEnd with a line saying just \"end\".*>$"\
+                     {send "nextwhere\nend\n"
+                      expect {
+                        -re "$gdb_prompt"\
+                                {
+                                #pass "define hook undefined command: bar"
+                                }
+                        timeout {
+                            send_user "(timeout) define hook undefined command: bar"
+                            set GRET [expr $GRET + 1]
+                        }
+                      }
+                     }
+             timeout {send_user  "(timeout) define hook undefined command: bar"
+                            set GRET [expr $GRET + 1]
+             }
+           }
+          }
+  timeout {send_user "(timeout) define hook undefined command: bar"
+    set GRET [expr $GRET + 1]
+  }
+}
+
+# Test creation of an additional target subcommand.
+gdb_test "define target testsuite" "Type commands for definition of \"target testsuite\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "printf \"hello\\n\"\nend" "" "define target testsuite"
+gdb_test "document target testsuite" "Type documentation for \"target testsuite\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "A test target.\nend" "" "document target testsuite"
+
+gdb_test "help target" ".*A test target.*"
+gdb_test "target testsuite" "hello"
+gdb_test "show user target testsuite" "User command \"target testsuite\":\r\n  printf \"hello\\\\n\"\r\n"
+
+# We should even be able to hook subcommands.
+gdb_test "define target hook-testsuite" "Type commands for definition of \"target hook-testsuite\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "printf \"one\\n\"\nend" "" "define target hook-testsuite"
+
+gdb_test "define target hookpost-testsuite" "Type commands for definition of \"target hookpost-testsuite\".\r\nEnd with a line saying just \"end\".*>$" 
+gdb_test "printf \"two\\n\"\nend" "" "define target hookpost-testsuite"
+
+gdb_test "target testsuite" "one\r\nhello\r\ntwo" "target testsuite with hooks"
+
+# This is a quasi-define command: Verify that the user can redefine
+# GDB's gdb_prompt.
+#
+gdb_test "set prompt \\(blah\\) " "\\(blah\\)" 
+
+gdb_test "set prompt \\(gdb\\) " "$gdb_prompt" 
+
+gdb_exit
+exit $GRET
+
+interact

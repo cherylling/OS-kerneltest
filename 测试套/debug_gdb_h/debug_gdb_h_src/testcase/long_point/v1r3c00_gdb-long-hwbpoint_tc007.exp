@@ -1,0 +1,84 @@
+#!/usr/bin/expect -f 
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global TEST_LEN TEST_OFFSET
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/long_point"
+gdb_test "cd /tmp/for_gdb_test/long_point" "$target_prompt"
+
+if { $TEST_LEN == "0" } {
+send "cat /proc/cmdline\n"
+expect {
+    -timeout 5
+    -re "cetartlb=0x(\[0-9a-fA-F\]+)%0x(\[0-9a-fA-F\]+)" {
+        set TEST_LEN $expect_out(1,string)
+        set TEST_OFFSET $expect_out(2,string)
+    }
+    timeout {
+        send_user "\n cat /proc/cmdline timeout \n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+}
+
+set srcfile v1r3c00_gdb-long-hwbpoint_tc001.c
+
+gdb_test "'$GDB_TOOL_DIR'gdb v1r3c00_gdb-long-hwbpoint_tc001" "$gdb_prompt"
+
+set VM_ADDR 0x40000000
+
+gdb_test "b main" "reakpoint 1 at .* $srcfile.*$gdb_prompt"
+gdb_test "r $TEST_LEN $TEST_OFFSET" "Breakpoint 1, main .* at $srcfile.*$gdb_prompt"
+gdb_test "b 102" "reakpoint 2 at .* $srcfile.*$gdb_prompt"
+gdb_test "c" "mmap pass.*reakpoint 2.*$gdb_prompt"
+
+gdb_test "delete breakpoints" "y or n"
+gdb_test "y" "$gdb_prompt"
+gdb_test "info breakpoint" "No breakpoints or watchpoints.*$gdb_prompt"
+
+set VM_ADDR 0x40000000
+set i 0
+gdb_test "watch *$VM_ADDR" "Hardware watchpoint 3: \\\*$VM_ADDR.*$gdb_prompt"
+set VM_ADDR [expr $VM_ADDR + 0x10]
+gdb_test "mwatch *$VM_ADDR len 0x10" "Hardware long mem watchpoint 4: \\\*$VM_ADDR.*$gdb_prompt"
+
+set VM_ADDR 0x40000000
+gdb_test "mrwatch *$VM_ADDR len 0x20" "Hardware long mem read watchpoint 5: \\\*$VM_ADDR.*$gdb_prompt"
+
+set VM_ADDR 0x40000000
+set VM_ADDR [expr $VM_ADDR + 0x10]
+gdb_test "mawatch *$VM_ADDR len 0x10" "Hardware long mem access \\\(read/write\\\) watchpoint 6: \\\*$VM_ADDR.*$gdb_prompt"
+
+gdb_test "info breakpoints" "3.*hw watchpoint.*keep y.*\\\*0x40000000.*4.*hw watchpoint.*keep y.*\\\*1073741840.*5.*read watchpoint.*keep y.*\\\*0x40000000.*6.*acc watchpoint.*keep y.*\\\*1073741840.*$gdb_prompt"
+
+
+gdb_test "delete breakpoints" "y or n"
+gdb_test "y" "$gdb_prompt"
+gdb_test "b 117" "reakpoint 7 at .* $srcfile.*$gdb_prompt"
+gdb_test "c" "reakpoint 7, main .* at $srcfile.*$gdb_prompt"
+gdb_test "c" "mprotect PROT_READ pass as expected.*$gdb_prompt"
+gdb_exit
+exit $GRET
+
+interact

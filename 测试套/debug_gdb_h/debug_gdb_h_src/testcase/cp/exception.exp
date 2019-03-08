@@ -1,0 +1,247 @@
+#!/usr/bin/expect -f 
+# Copyright 1997-1998, 2004-2005, 2007-2012 Free Software Foundation,
+# Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file is part of the gdb testsuite.
+# tests for exception-handling support
+# Written by Satish Pai <pai@apollo.hp.com> 1997-07-23
+# Rewritten by Michael Chastain <mec.gnu@mindspring.com> 2004-01-08
+
+# This file used to have two copies of the tests with different
+# compiler flags for hp-ux.  Instead, the user should set CXXOPTS
+# or run runtest with --target_board unix/gdb:debug_flags="..."
+# to choose the compiler flags.
+#
+# The interesting compiler flags are: "aCC +A -Wl,-a,-archive" .
+# Static-linked executables use a different mechanism to get the
+# address of the notification hook in the C++ support library.
+
+# TODO: this file has many absolute line numbers.
+# Replace them with gdb_get_line_number.
+
+set ws	"\[\r\n\t \]+"
+set nl	"\[\r\n\]+"
+#if { [skip_stl_tests] } { continue }
+
+# On SPU this test fails because the executable exceeds local storage size.
+#if { [istarget "spu*-*-*"] } {
+#        return 0
+#}
+
+set testfile "exception"
+set srcfile ${testfile}.cc
+#set binfile ${objdir}/${subdir}/${testfile}
+ 
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug c++}] != "" } {
+#     untested exception.exp
+#     return -1
+#}
+
+# Start with a fresh gdb
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+# Set a catch catchpoint
+
+gdb_test "catch catch" "Catchpoint \[0-9\]+ \\(catch\\)" \
+    "catch catch (before inferior run)"
+
+# Set a throw catchpoint
+
+gdb_test "catch throw" "Catchpoint \[0-9\]+ \\(throw\\)" \
+    "catch throw (before inferior run)"
+
+
+# The catchpoints should be listed in the list of breakpoints.
+# In case of a statically linked test, we won't have a pending breakpoint.
+# Hence we allow for both an address or "<PENDING>". If we ever become able
+# to tell whether the target is linked statically or not, we can be more
+# precise and require exact output.
+set addr "\(<PENDING>|$hex\)"
+set re_head	"Num${ws}Type${ws}Disp${ws}Enb${ws}Address${ws}What"
+set re_2_bp	"1${ws}breakpoint${ws}keep${ws}y${ws}$addr${ws}exception catch"
+set re_3_bp	"2${ws}breakpoint${ws}keep${ws}y${ws}$addr${ws}exception throw"
+
+set name "info breakpoints (before inferior run)"
+gdb_test "info breakpoints" "$re_head${ws}$re_2_bp${ws}$re_3_bp.*$gdb_prompt" 
+
+gdb_test "tbreak main" "Temporary breakpoint 3.*" \
+    "Set temporary breakpoint at main"
+
+set ok 0
+gdb_run_cmd
+send "\n"
+expect {
+    -re "Temporary breakpoint 3,.*$gdb_prompt" {
+#	pass "Run to main"
+	set ok 1
+    }
+}
+
+if { !$ok } {
+#    continue
+    exit -1
+}
+
+set addr "$hex"
+set re_head	"Num${ws}Type${ws}Disp${ws}Enb${ws}Address${ws}What"
+set re_2_bp	"1${ws}breakpoint${ws}keep${ws}y${ws}$addr${ws}exception catch"
+set re_3_bp	"2${ws}breakpoint${ws}keep${ws}y${ws}$addr${ws}exception throw"
+
+set name "info breakpoints (after inferior run)"
+gdb_test "info breakpoints" "$re_head${ws}$re_2_bp${ws}$re_3_bp.*$gdb_prompt" 
+
+gdb_test "break catcher" "Breakpoint \[0-9\]+ at.*"
+
+# Get the first exception thrown
+set timeout 5       
+set name "continue to first throw"
+send "continue\n"
+expect {
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception thrown\\), throw location.*${srcfile}:30, catch location .*${srcfile}:50.*$gdb_prompt" {
+#	pass $name
+    }
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception thrown\\).*$gdb_prompt" {
+#	pass $name
+    }
+    timeout {
+       send_user "timeout 145 \n"
+       set GRET [expr $GRET + 1]
+    }
+}
+
+# Backtrace from the throw point.
+# This should get to user code.
+
+set name "backtrace after first throw"
+gdb_test "backtrace" ".*#\[0-9\]+.*\[\[:<:\]\]__cxa_throw\[\[:>:\]\].*#\[0-9\]+${ws}$hex in foo \\(i=20\\) at .*${srcfile}:\[0-9\]+\r\n#\[0-9\]+${ws}$hex in main \\(.*\\) at .*${srcfile}:\[0-9\]+.*$gdb_prompt" 
+
+# Continue to the catch.
+
+set name "continue to first catch"
+send "continue\n"
+expect {
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception caught\\), throw location.*${srcfile}:30, catch location .*${srcfile}:50.*$gdb_prompt" {
+#	pass $name
+    }
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception caught\\).*$gdb_prompt" {
+#	pass $name
+    }
+    timeout {
+       send_user "timeout 168 \n"
+       set GRET [expr $GRET + 1]
+    }
+}
+
+# Backtrace from the catch point.
+# This should get to user code.
+
+set name "backtrace after first catch"
+gdb_test "backtrace" ".*#\[0-9\]+.*\[\[:<:\]\]__cxa_begin_catch\[\[:>:\]\].*#\[0-9\]+${ws}$hex in main \\(.*\\) at .*$srcfile:\[0-9\]+.*$gdb_prompt" 
+
+# Continue to breakpoint on catcher.
+gdb_test "continue" ".*catcher \\(x=13\\).*" "continue to catcher for the first time"
+
+# Continue to second throw.
+
+set name "continue to second throw"
+send "continue\n"
+expect {
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception thrown\\), throw location.*${srcfile}:30, catch location .*${srcfile}:58.*$gdb_prompt" {
+#	pass $name
+    }
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception thrown\\).*$gdb_prompt" {
+#	pass $name
+    }
+    timeout {
+       send_user "timeout 194 \n"
+       set GRET [expr $GRET + 1]
+    }
+}
+
+# Backtrace from the throw point.
+# This should get to user code.
+
+set name "backtrace after second throw"
+gdb_test "backtrace" ".*#\[0-9\]+.*\[\[:<:\]\]__cxa_throw\[\[:>:\]\].*#\[0-9\]+${ws}$hex in foo \\(i=20\\) at .*${srcfile}:\[0-9\]+\r\n#\[0-9\]+${ws}$hex in main \\(.*\\) at .*${srcfile}:\[0-9\]+.*$gdb_prompt"
+
+# Continue to second catch.
+
+set name "continue to second catch"
+send "continue\n"
+expect {
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception caught\\), throw location.*${srcfile}:30, catch location .*${srcfile}:58.*$gdb_prompt" {
+#	pass $name
+    }
+    -re "Continuing.${ws}Catchpoint \[0-9\]+ \\(exception caught\\).*$gdb_prompt" {
+#	pass $name
+    }
+    timeout {
+       send_user "timeout 220 \n"
+       set GRET [expr $GRET + 1]
+    }
+}
+
+# Backtrace from the catch point.
+# This should get to user code.
+
+set name "backtrace after second catch"
+gdb_test "backtrace" ".*#\[0-9\]+.*\[\[:<:\]\]__cxa_begin_catch\[\[:>:\]\].*#\[0-9\]+${ws}$hex in main \\(.*\\) at .*$srcfile:\[0-9\]+.*$gdb_prompt"
+
+# Continue to breakpoint on catcher.
+gdb_test "continue" ".*catcher \\(x=13\\).*" "continue to catcher for the second time"
+
+# That is all for now.
+# 
+# The original code had:
+#
+#    continue to re-throw ; backtrace
+#    continue to catch    ; backtrace
+#    continue to throw out of main
+#
+# The problem is that "re-throw" does not show a throw; only a catch.
+# I do not know if this is because of a bug, or because the generated
+# code is optimized for a throw into the same function.
+#
+# -- chastain 2004-01-09
+exit $GRET
+
+interact

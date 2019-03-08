@@ -1,0 +1,139 @@
+#!/usr/bin/expect -f
+
+# Copyright 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# The problem was due to amd64_skip_prologue attempting to access inferior
+# memory before the PIE (Position Independent Executable) gets relocated.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+	-timeout 2
+	-re "$target_prompt*" {}
+	timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+	}
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+
+set testfile "pie-execl"
+set srcfile ${testfile}.c
+set executable1 ${testfile}1
+set executable2 ${testfile}2
+#set binfile1 ${objdir}/${subdir}/${executable1}
+#set binfile2 ${objdir}/${subdir}/${executable2}
+#set binfile2_test_msg OBJDIR/${subdir}/${executable2}
+
+# Use conditional compilation according to `BIN' as GDB remembers the source
+# file name of the breakpoint.
+
+#set opts [list debug {additional_flags=-fPIE -pie}]
+#if {[build_executable ${testfile}.exp $executable1 $srcfile [concat $opts {additional_flags=-DBIN=1}]] == ""
+#    || [build_executable ${testfile}.exp $executable2 $srcfile [concat $opts {additional_flags=-DBIN=2}]] == ""} {
+#    return -1
+#}
+
+#clean_restart ${executable1}
+
+gdb_test "'$GDB_TOOL_DIR'gdb $executable1" "$GDBPROMPT"
+
+gdb_test_no_output "set args ${executable2}" ""
+
+if ![runto_main] {
+    return -1
+}
+
+send "set args pie-execl2\n"
+
+# Do not stop on `main' after re-exec.
+delete_breakpoints
+
+gdb_breakpoint "pie_execl_marker"
+gdb_test "info breakpoints" ".*" ""
+
+set addr1 ""
+set test "pie_execl_marker address first"
+send "p/x &pie_execl_marker\n"  
+    expect {
+    -re " = (0x\[0-9a-f\]+).*$GDBPROMPT" {
+	send_user "expect_out(buffer)=$expect_out(buffer)"
+    send_user "expect_out(1,string)=$expect_out(1,string)"
+    set addr1 $expect_out(1,string)
+	send_user "pass $test"
+    }
+}
+send_user "addr1 is $addr1"
+set test "continue"
+send "$test\n" 
+    expect {
+    -timeout 2
+    -re "Error in re-setting breakpoint" {
+	send_user "fail $test"
+    set GRET [expr $GRET + 1]
+    }
+    -re "Cannot access memory" {
+	send_user "fail $test"
+    set GRET [expr $GRET + 1]
+    }
+    -re "pie-execl: re-exec.*executing new program.*\r\nBreakpoint \[0-9\]+,\[^\r\n\]* pie_execl_marker.*$GDBPROMPT" {
+	send_user "pass $test"
+    }
+    timeout {send_user "timeout  $test";
+    set GRET [expr $GRET + 1]
+    }
+}
+
+gdb_test "info breakpoints" ".*" ""
+
+set addr2 ""
+set test "pie_execl_marker address second"
+send "p/x &pie_execl_marker\n"  
+    expect {
+    -re " = (0x\[0-9a-f\]+).*$GDBPROMPT" {
+    send_user "expect_out(buffer)=$expect_out(buffer)"
+    send_user "expect_out(1,string)=$expect_out(1,string)"
+	set addr2 $expect_out(1,string)
+	send_user "pass $test"
+    }
+}
+send_user "addr2 is $addr2"
+# Ensure we cannot get a false PASS and the inferior has really changed.
+set test "pie_execl_marker address has changed"
+if [string equal $addr1 $addr2] {
+    send_user "fail $test"
+    set GRET [expr $GRET + 1]
+} else {
+    send_user "pass $test"
+}
+
+exit $GRET
+interact

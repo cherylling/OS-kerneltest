@@ -1,0 +1,53 @@
+#!/usr/bin/expect -f 
+set RET 0
+source ./expectconf
+set restr "Performance_test \# "
+
+#clean env
+expect "*"
+
+#login the target
+spawn ssh ${exp_user}@${exp_target_ip}
+expect {
+    -timeout 2
+    -re "$TARGET_HOSTNAME" {
+    }
+    timeout {
+	}
+}
+
+#set finger information
+send "export PS1=\"${restr}\"\r"
+expect "${restr}"
+
+if { $argc != 0 } {
+	for {set exp_count 0} {$exp_count < $argc} {incr exp_count} {
+	#send command
+	set Exp_arg [lindex $argv $exp_count]
+	send "$Exp_arg\r"
+	expect {
+		-timeout 25000
+		-re "${restr}" {
+		}
+		timeout {
+			set RET [expr $RET + 1]
+		}
+	}
+	#get the return value
+	send "echo \$?\r"
+	expect { 
+		-timeout 2
+		-re "\n0\r" {
+		}
+		timeout {
+			set RET [expr $RET + 1]
+		}
+	}
+	expect "\n$restr"
+	}
+}
+
+#logout
+send "exit\r"
+expect ".*"
+exit $RET

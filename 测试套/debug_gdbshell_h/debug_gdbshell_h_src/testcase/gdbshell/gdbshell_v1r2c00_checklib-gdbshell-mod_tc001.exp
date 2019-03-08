@@ -1,0 +1,45 @@
+#!/usr/bin/expect -f 
+#######################################################################
+##- @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.
+##- @Suitename: debug_gdbshell_h
+##- @Name: gdbshell_v1r2c00_checklib-gdbshell-mod_tc001
+##- @Author: l00191161
+##- @Date: 2013-10-17
+##- @Precon: 支持gdbshell
+##- @Brief: 动态库/usr/lib/libgdbhook.so、gdbshell命令验证
+##- @Detail: 动态库/usr/lib/libgdbhook.so、gdbshell命令是否存在,权限是否正确。
+##- @Expect: 动态库/usr/lib/libgdbhook.so、gdbshell命令存在,权限都为-rwxr-xr-x 。
+##- @Level: Level 1
+##- @Auto: True
+##- @Modify:
+#######################################################################*/
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdbshell_test/gdbshell" "$target_prompt"
+gdb_test "./gdbshell_v1r2c00_checklib-gdbshell-mod_tc001.sh" "PASS"
+
+exit $GRET
+
+interact

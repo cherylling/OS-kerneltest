@@ -1,0 +1,258 @@
+#!/usr/bin/expect -f 
+#######################################################################
+##- @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.
+##- @Suitename: debug_gdbshell_h
+##- @Name: gdbshell_v1r2c00_rtat-rtbt-self_tc006
+##- @Author: l00191161
+##- @Date: 2013-10-17
+##- @Precon: 支持gdbshell
+##- @Brief: 未rtint直接rtbt
+##- @Detail: 1，启动多进程多线程，
+#            2，gdbshell rtat其中某个进程，info thread得到该进程下线程的infier id
+#            3，未rtint中断需要获取信息的线程，rtbt是否打印出工作线程调用栈信息。
+#            4，调试工作线程过程不影响原进程下所有线程。
+#            5，退出
+##- @Expect: 未rtint，rtbt打印出工作线程调用栈信息，查看其他线程不受影响。程序退出无异常
+##- @Level: Level 3
+##- @Auto: True
+##- @Modify:
+#######################################################################*/
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdbshell_test/gdbshell" "$target_prompt"
+global testpid
+global binfile
+set binfile thread_test
+set testpid 0
+gdb_test "killall $binfile"
+sleep 1
+gdb_test "./$binfile &" "$target_prompt"
+sleep 5
+send "ps -ef | grep $binfile |grep -v \"grep $binfile\"|sed -n 1p |awk '\{print \$2\}'\n"
+expect {
+    -timeout 2
+        -re "(\[0-9\]+)\r\n" {
+            set testpid $expect_out(1,string)
+        }
+    timeout {
+        send_user "fail \n"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+send_user "testpid=$testpid \n"
+
+if { $testpid == 0 } {
+     set GRET [expr $GRET + 1]
+     exit $GRET
+}
+
+set target_prompt "/tmp/for_gdbshell_test/gdbshell"
+set tid1 $testpid
+set tid2 $testpid
+set tid3 $testpid
+set tid4 $testpid
+send "ls /proc/$testpid/task/|sed -n 1p\n"
+expect {
+    -re "(\[0-9\]+)\r\n" {
+        set tid1 $expect_out(1,string)        
+    }
+}
+
+send "ls /proc/$testpid/task/|sed -n 2p\n"
+expect {
+    -re "(\[0-9\]+)\r\n" {
+        set tid2 $expect_out(1,string)        
+    }
+}
+send "ls /proc/$testpid/task/|sed -n 3p\n"
+expect {
+    -re "(\[0-9\]+)\r\n" {
+        set tid3 $expect_out(1,string)        
+    }
+}
+
+send "ls /proc/$testpid/task/|sed -n 4p\n"
+expect {
+    -re "(\[0-9\]+)\r\n" {
+        set tid4 $expect_out(1,string)        
+    }
+}
+send_user "\ntid1=$tid1, tid2=$tid2, tid3=$tid3,  tid3=$tid4\n"
+if { $tid1 == $tid2 || $tid2 == $tid3 || $tid1 == $tid3 || $tid1 == $tid4 || $tid2 == $tid4 || $tid3 == $tid4  } {
+    send_user "\n***********get tid fail\n"
+    set GRET [expr $GRET + 1]
+}
+
+set tid1_state a
+set tid2_state a
+set tid3_state a
+set tid4_state a
+
+send "cat /proc/$testpid/task/$tid1/status|grep State|awk '\{print \$2\}'\n"
+expect {
+    -re "(\[A-Za-z\])+\r\n" {
+        set tid1_state $expect_out(1,string)
+    }
+}
+send "cat /proc/$testpid/task/$tid2/status|grep State|awk '\{print \$2\}'\n"
+expect {
+    -re "(\[A-Za-z\])+\r\n" {
+        set tid2_state $expect_out(1,string)
+    }
+}
+send "cat /proc/$testpid/task/$tid3/status|grep State|awk '\{print \$2\}'\n"
+expect {
+    -re "(\[A-Za-z\])+\r\n" {
+        set tid3_state $expect_out(1,string)
+    }
+}
+
+send "cat /proc/$testpid/task/$tid4/status|grep State|awk '\{print \$2\}'\n"
+expect {
+    -re "(\[A-Za-z\])+\r\n" {
+        set tid4_state $expect_out(1,string)
+    }
+}
+
+send_user "tid1_state=$tid1_state, tid2_state=$tid2_state, tid3_state=$tid3_state, tid4_state=$tid4_state\n"
+gdb_test "'$GDB_TOOL_DIR'gdbshell" "$gdb_prompt"
+
+gdb_test "rtat $testpid" "gdbshellagent.*$gdb_prompt"
+
+gdb_test "show help" "help"
+set THREAD_NUM 0
+send "info threads\n"
+expect {
+    -timeout 5
+    -re "thread_test" {
+        incr THREAD_NUM
+        exp_continue
+    }
+    -re "gdb_prompt" {
+    }
+}
+
+gdb_test "show help" "help"
+send "info threads\n"
+expect {
+    -timeout 5
+    -re "gdbshellagent" {
+        incr THREAD_NUM
+        exp_continue
+    }
+    -re "gdb_prompt" {
+    }
+}
+
+if { $THREAD_NUM != 4 } {
+    send_user "threads num is $THREAD_NUM mismatch 4 while info threads"
+    set GRET [expr $GRET + 1] 
+}
+
+set work_tid 0
+send "info threads\n"
+expect {
+    -re "\\(LWP (\[0-9\]+)\\) \"gdbshellagent\"" {
+        set work_tid $expect_out(1,string)
+    }
+}
+
+if { $work_tid != $tid1 && $work_tid != $tid2 && $work_tid != $tid3 && $work_tid != $tid4 } {
+    send_user "get work threads tid error \n"
+    set GRET [expr $GRET + 1]
+}
+
+set bt1 0;
+set bt2 0;
+set bt3 0;
+set bt4 0;
+    
+
+for { set i 0 } { $i < 5 } { incr i } {
+    gdb_test "rtbt" "#0  $hex in gdbshell_hook_point.*#1  $hex in gdbshell_hook_thread.*#2  $hex in start_thread.*#3  $hex in clone.*"
+    set tid1_sf b
+    set tid2_sf b
+    set tid3_sf b
+    set tid4_sf b
+    gdb_test "show non-stop" "Controlling the inferior in non-stop mode is on."
+    send "shell cat /proc/$testpid/task/$tid1/status|grep State|awk '\{print \$2\}'\n"
+    expect {
+        -re "(\[A-Za-z\])+\r\n" {
+            set tid1_sf $expect_out(1,string)
+        }
+    }
+    send "shell cat /proc/$testpid/task/$tid2/status|grep State|awk '\{print \$2\}'\n"
+    expect {
+        -re "(\[A-Za-z\])+\r\n" {
+            set tid2_sf $expect_out(1,string)
+        }
+    }
+    send "shell cat /proc/$testpid/task/$tid3/status|grep State|awk '\{print \$2\}'\n"
+    expect {
+        -re "(\[A-Za-z\])+\r\n" {
+           set tid3_sf $expect_out(1,string)
+        }
+    }
+
+    send "shell cat /proc/$testpid/task/$tid4/status|grep State|awk '\{print \$2\}'\n"
+    expect {
+        -re "(\[A-Za-z\])+\r\n" {
+           set tid4_sf $expect_out(1,string)
+        }
+    }
+
+    send_user "$tid1_sf, $tid2_sf, $tid3_sf, $tid4_sf\n"
+    if { $work_tid == $tid1 } {
+        if { $tid1_sf != "t" || $tid2_sf != $tid2_state || $tid3_sf != $tid3_state || $tid4_sf != $tid4_state } {
+            send_user "the job threads' status changed,while rtbt the work thread \n"
+            set GRET [expr $GRET + 1]
+        }
+    } elseif { $work_tid == $tid2 } {
+        if { $tid2_sf != "t" || $tid1_sf != $tid1_state || $tid3_sf != $tid3_state || $tid4_sf != $tid4_state } {
+            send_user "the job threads' status changed,while rtbt the work thread \n"
+            set GRET [expr $GRET + 1]
+        }
+    } elseif { $work_tid == $tid3 } {
+        if { $tid3_sf != "t" || $tid1_sf != $tid1_state || $tid2_sf != $tid2_state || $tid4_sf != $tid4_state } {
+            send_user "the job threads' status changed,while rtbt the work thread \n"
+            set GRET [expr $GRET + 1]
+        }
+    } elseif { $work_tid == $tid4 } {
+        if { $tid4_sf != "t" || $tid1_sf != $tid1_state || $tid3_sf != $tid3_state || $tid2_sf != $tid2_state } {
+            send_user "the job threads' status changed,while rtbt the work thread \n"
+            set GRET [expr $GRET + 1]
+        }
+    }
+}
+
+gdb_test "detach" "Detaching from program:.*process $testpid"
+
+gdb_exit
+gdb_test "killall thread_test" "$target_prompt"
+sleep 1
+exit $GRET
+
+interact

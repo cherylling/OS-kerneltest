@@ -1,0 +1,188 @@
+#!/usr/bin/expect -f 
+#   Copyright 1999-2004, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Elena Zannoni (ezannoni@cygnus.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+#
+# test running programs
+#
+
+#if { [skip_cplus_tests] } { continue }
+
+set testfile "annota2"
+set srcfile ${testfile}.cc
+set binfile ${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug c++ nowarnings}] != "" } {
+#    untested annota2.exp
+#    return -1
+#}
+
+# are we on a target board? If so, don't run these tests.
+# note: this is necessary because we cannot use runto_main (which would
+# work for remote targets too) because of the different prompt we get
+# when using annotation level 2.
+#
+#if [is_remote target] then {
+#    return 0
+#}
+
+
+#if [target_info exists gdb_stub] {
+#    gdb_step_for_stub;
+#}
+
+#
+# line number where we need to stop in main
+#
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+set main_line 25
+
+# The commands we test here produce many lines of output; disable "press 
+# <return> to continue" prompts.
+gdb_test_no_output "set height 0"
+
+runto_main
+#
+# break at main
+#
+gdb_test "break 25" \
+    "Breakpoint.*at.* file .*$srcfile, line.*" \
+    "breakpoint main"
+
+
+#
+# NOTE: this prompt is OK only when the annotation level is > 1
+# NOTE: When this prompt is in use the gdb_test procedure cannot be used because
+# it assumes that the last char of the gdb_prompt is a white space. This is not
+# true with this annotated prompt. So we must use send_gdb and gdb_expect.
+#
+
+set old_gdb_prompt $gdb_prompt
+set gdb_prompt "\r\n\032\032pre-prompt.*$gdb_prompt \r\n\032\032prompt\r\n"
+
+gdb_test "set annotate 2" "$gdb_prompt"
+
+gdb_test "run" "$main_line.*$gdb_prompt" 
+
+#
+# print class 'a' with public fields.
+# this will test:
+# annotate-field-begin
+# annotate-field-name-end
+# annotate-field-value
+# annotate-field-end
+#
+gdb_test "print a" "\r\n\032\032post-prompt\r\n\r\n\032\032value-history-begin 1 -\r\n.*= \r\n\032\032value-history-value\r\n\\{\r\n\032\032field-begin -\r\nx\r\n\032\032field-name-end\r\n = \r\n\032\032field-value\r\n1\r\n\032\032field-end\r\n, \r\n\032\032field-begin -\r\ny\r\n\032\032field-name-end\r\n = \r\n\032\032field-value\r\n2\r\n\032\032field-end\r\n\\}\r\n\r\n\032\032value-history-end.*$gdb_prompt" 
+
+#
+# continue until exit
+# this will test:
+# annotate-exited
+# `a.x is 1' is asynchronous regarding to `frames-invalid'.
+#
+gdb_test "continue" "\r\n\032\032post-prompt\r\nContinuing.\r\n\r\n\032\032starting\(\r\n\r\n\032\032frames-invalid\)*\r\na.x is 1\r\n\(\r\n\032\032frames-invalid\r\n\)*\r\n\032\032exited 0\r\n$inferior_exited_re normally.\r\n\r\n\032\032stopped.*$gdb_prompt"
+
+#
+# delete all breakpoints
+#
+gdb_test "delete" ".*Delete all breakpoints. \\(y or n\\) \r\n\032\032query.*" 
+gdb_test "y" "\r\n\032\032post-query.*$gdb_prompt"
+
+#
+# break at first line of main. 
+#
+gdb_test "break 22" "\r\n\032\032post-prompt\r\n\r\n\032\032breakpoints-invalid\r\nBreakpoint.*at $hex: file.*$srcfile, line.*$gdb_prompt"
+
+#
+# change value of main_line
+#
+set main_line 22
+
+#
+# run program up to breakpoint.
+#
+
+gdb_test "run"  "$main_line.*$gdb_prompt"  
+
+#
+# set up a watch point on a.x 
+#
+gdb_test "watch a.x" "\r\n\032\032post-prompt\r\n\r\n\032\032breakpoints-invalid\r\n.*atchpoint 3: a.x.*$gdb_prompt" 
+
+#
+# do a next, so that the watchpoint triggers. This will test:
+# annotate-watchpoint
+#
+gdb_test "next" "\r\n\032\032post-prompt\r\n\r\n(\032\032breakpoints-invalid\r\n\r\n)*\032\032starting\r\n\r\n(\032\032frames-invalid\r\n\r\n)*\032\032watchpoint 3\r\n.*atchpoint 3: a.x\r\n\r\nOld value = 0\r\nNew value = 1\r\n\r\n\032\032frame-begin 0 $hex\r\n\r\n\032\032frame-function-name\r\nmain\r\n\032\032frame-args\r\n \\(\\)\r\n\032\032frame-source-begin\r\n at \r\n\032\032frame-source-file\r\n.*$srcfile\r\n\032\032frame-source-file-end\r\n:\r\n\032\032frame-source-line\r\n$decimal\r\n\032\032frame-source-end\r\n\r\n\r\n\032\032source .*$srcfile.*beg:$hex\r\n\r\n\032\032frame-end\r\n\r\n\032\032stopped.*$gdb_prompt" 
+
+#
+# send ^C to gdb, so that the quit() function gets called 
+# and annotate-quit is tested
+# test:
+# annotate-quit
+#
+send "\003"
+expect {
+    -timeout 5
+    -re "\r\n\032\032error-begin\r\nQuit\r\n\r\n\032\032quit.*$gdb_prompt" {
+    }
+    timeout { 
+        send_user "fail annotate-quit (timeout)"
+        set GRET [expr $GRET + 1]
+        }
+}
+
+#
+# FIXME: the testsuite does not currently have tests for 
+#        annotate_catchpoints and annotate_function_call
+#        and a few variants of the annotations that are 
+#        tested (marked by FIXME on the annot?.exp files)
+#
+
+# reinstall the old prompt for the rest of the testsuite.
+
+set gdb_prompt $old_gdb_prompt
+
+exit $GRET
+
+interact

@@ -1,0 +1,21 @@
+#include<stdlib.h>
+#include<stdio.h>
+#include<string.h>
+char p[]="hello world";
+char test_arry[20]={0};
+int main()
+{
+    int a=0x01010101;
+    int i=0;
+    i=strlen(a);
+    printf("i is %d\n",i);
+    memset(test_arry,0,sizeof(test_arry));
+    printf("the sizeof *p is %d\n",sizeof(p));
+    strncpy(test_arry,p,sizeof(p));
+    printf("the test-arry is %s\n",test_arry);
+    memset(test_arry,0,sizeof(test_arry));
+    strncpy(test_arry,p,strlen(p));
+    printf("the strlen p is %d\n",strlen(p));
+    printf("the test_arry is %s\n",test_arry);
+    return 0;
+}

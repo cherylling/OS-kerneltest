@@ -1,0 +1,198 @@
+#!/usr/bin/expect -f
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# Test support for stepping over longjmp.
+#
+
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "longjmp"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug nowarnings}] != "" } {
+#     untested longjmp.exp
+#     return -1
+#}
+
+#if [get_compiler_info] {
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+#if ![runto_main] then {
+#   fail "Can't run to main"
+#   return 0
+#}
+
+gdb_test "b main" ""
+gdb_test "c" ""
+set bp_miss_step_1 [gdb_get_line_number "miss_step_1"]
+set bp_miss_step_2 [gdb_get_line_number "miss_step_2"]
+
+set bp_start_test_1 [gdb_get_line_number "patt1"]
+set bp_start_test_2 [gdb_get_line_number "patt2"]
+set bp_start_test_3 [gdb_get_line_number "patt3"]
+
+#
+# Pattern 1 - simple longjmp.
+#
+
+delete_breakpoints
+
+gdb_test "break $bp_start_test_1" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_start_test_1.*" \
+    "breakpoint at pattern 1 start"
+gdb_test "continue" "patt1.*" "continue to breakpoint at pattern 1 start"
+
+# set safe-net break
+gdb_test "break $bp_miss_step_1" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_miss_step_1.*" \
+    "breakpoint at miss_step_1"
+
+gdb_test "next" "longjmps\\+\\+;.*" "next over setjmp (1)"
+gdb_test "next" "longjmp \\(env, 1\\);.*" "next to longjmp (1)"
+
+set msg "next over longjmp(1)"
+send "next\n"
+expect {
+    -re ".*patt1.*$gdb_prompt" {
+	pass $msg
+	gdb_test "next" "resumes\\+\\+.*" "next into else block (1)"
+	gdb_test "next" "miss_step_1.*" "next into safety net (1)"
+    }
+    -re "miss_step_1.*$gdb_prompt" {
+	fail $msg
+    }
+    timeout {
+        fail "timeout n1"
+    }
+}
+
+#
+# Pattern 2 - longjmp from an inner function.
+#
+
+delete_breakpoints
+
+gdb_test "break $bp_start_test_2" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_start_test_2.*" \
+    "breakpoint at pattern 2 start"
+gdb_test "continue" "patt2.*" "continue to breakpoint at pattern 2 start"
+
+# set safe-net break
+gdb_test "break $bp_miss_step_2" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_miss_step_2.*" \
+    "breakpoint at miss_step_2"
+
+gdb_test "next" "call_longjmp.*" "next over setjmp (2)"
+
+set msg "next over call_longjmp (2)"
+send "next\n"
+expect {
+    -re ".*patt2.*$gdb_prompt" {
+	pass $msg
+
+	gdb_test "next" "resumes\\+\\+.*" "next into else block (2)"
+	gdb_test "next" "miss_step_2.*" "next into safety net (2)"
+    }
+    -re "miss_step_2.*$gdb_prompt" {
+	fail $msg
+    }
+    timeout {
+        fail "timeout n"
+    }
+}
+
+#
+# Pattern 3 - setjmp/longjmp inside stepped-over function.
+#
+
+delete_breakpoints
+
+gdb_test "break $bp_start_test_3" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_start_test_3.*" \
+    "breakpoint at pattern 3 start"
+gdb_test "continue" "patt3.*" "continue to breakpoint at pattern 3 start"
+
+gdb_test "next" "longjmp caught.*" "next over patt3"
+
+gdb_exit
+exit $GRET
+
+interact

@@ -1,0 +1,166 @@
+#!/usr/bin/expect -f
+
+# This testcase is part of GDB, the GNU debugger.
+
+# Copyright 2004-2005, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Check that GDB can trigger and backtrace SIGSEGV signal stacks
+# caused by both accessing (data) and executing (code) at address
+# zero.
+
+# On function descriptor architectures, a zero descriptor, instead of
+# a NULL pointer, is used.  That way the NULL code test always
+# contains a zero code reference.
+
+# For recovery, sigjmp/longjmp are used.
+
+# This also tests backtrace/gdb1476.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global gdb_prompt
+global target_ip 
+global  target_prompt 
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+            -re "$target_prompt*" {}
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+	}
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+#if [target_info exists gdb,nosignals] {
+#    verbose "Skipping signull.exp because of nosignals."
+#    continue
+#}
+
+#if $tracelevel {
+#    strace $tracelevel
+#}
+
+
+set testfile "signull"
+set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested signull.exp
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+#
+# Run to `main' where we begin our tests.
+#
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT"
+
+if ![runto_main] then {
+    gdb_suppress_tests
+}
+
+# If we can examine what's at memory address 0, it is possible that we
+# could also execute it.  This could probably make us run away,
+# executing random code, which could have all sorts of ill effects,
+# especially on targets without an MMU.  Don't run the tests in that
+# case.
+
+send "x 0\n" 
+	expect {
+    -re "0x0:.*Cannot access memory at address 0x0.*$GDBPROMPT" { }
+    -re "0x0:.*Error accessing memory address 0x0.*$GDBPROMPT" { }
+    -re ".*$GDBPROMPT" {
+	send_user "Memory at address 0 is possibly executable"
+#return
+    }
+}
+
+# If an attempt to call a NULL pointer leaves the inferior in main,
+# then function pointers are descriptors, probe this and remember the
+# result.
+
+gdb_test_no_output "set test = code_entry_point" \
+    "set for function pointer probe"
+set test "probe function pointer"
+set function_pointer code_entry_point
+set signame "SIGSEGV"
+send "continue\n" 
+	expect {
+    -re "Program received signal SIGSEGV.*bowler .*$GDBPROMPT" {
+	set function_pointer code_descriptor
+	send_user "pass $test (function descriptor)"
+    }
+    -re "Program received signal SIGSEGV.*0.*$GDBPROMPT" {
+	send_user "pass $test (function entry-point)"
+    }
+    -re "Program received signal SIGBUS.*0.*$GDBPROMPT" {
+	set signame SIGBUS
+	send_user "pass $test (function entry-point)"
+    }
+}
+
+# Re-start from scratch, breakpoint the bowler so that control is
+# regained after each test, and run up to that.
+runto_main
+gdb_test "break bowler"
+gdb_test "break keeper"
+# By default Stop:Yes Print:Yes Pass:Yes
+gdb_test "handle SIGSEGV" "SIGSEGV.*Yes.*Yes.*Yes.*Segmentation fault"
+gdb_test "handle SIGBUS" "SIGBUS.*Yes.*Yes.*Yes.*Bus error"
+
+# For the given signal type, check that: the SIGSEGV occures; a
+# backtrace from the SEGV works; the sigsegv is delivered; a backtrace
+# through the SEGV works.
+
+proc test_segv { name tag bt_from_segv bt_from_keeper } {
+    global signame
+    gdb_test continue "Breakpoint.* bowler.*" "${name}; start with the bowler"
+    # NB: Don't use $tag in the testname - changes across systems.
+#gdb_test_no_output "set test = $tag" "${name}; select the pointer type"
+    gdb_test continue "Program received signal ${signame}.*" \
+	"${name}; take the ${signame}"
+    gdb_test backtrace $bt_from_segv "${name}; backtrace from ${signame}"
+    gdb_test continue "Breakpoint.* keeper.*" "${name}; continue to the keeper"
+    gdb_test backtrace $bt_from_keeper "${name}; backtrace from keeper through ${signame}"
+}
+
+test_segv "data read" data_read \
+    {#1.*bowler.*#2.*main.*} \
+    {#0 .* keeper .*#1  .* handler .*#3 .* bowler .*#4  .* main .*}
+test_segv "data write" data_write \
+    {#1 .* bowler .*#2  .* main .*} \
+    {#0 .* keeper .*#1  .* handler .*#3 .* bowler .*#4  .* main .*}
+test_segv code $function_pointer \
+    {#0 .* 0x0+ .*#1 .* bowler .*#2  .* main .*} \
+    {#0 .* keeper .*#1  .* handler .*#2 .* 0x0+ .*#3 .* bowler .*#4 .* main .*}
+
+exit $GRET
+interact

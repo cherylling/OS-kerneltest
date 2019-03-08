@@ -1,0 +1,189 @@
+#!/usr/bin/expect -f
+#   Copyright 1997-2000, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+
+# are we on a target board
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+#set testfile "advance"
+set testfile "so-indr-cl"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if ![isnative] then {
+#    return
+#}
+
+# This test is presently only valid on HP-UX, since it requires
+# that we use HP-UX-specific compiler & linker options to build
+# the testcase.
+#
+#if {! [istarget "hppa*-*-*hpux*"] } {
+#    return
+#}
+
+set libfile "solib"
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if [get_compiler_info] {
+#    return -1
+#}
+
+# Build the shared libraries this test case needs.
+#
+#cd ${subdir}
+#remote_exec build "$CC -g +z -c ${libfile}1.c -o ${libfile}1.o"
+
+
+#if {$hp_cc_compiler || $hp_aCC_compiler} {
+#    set additional_flags "additional_flags=+z"
+#} else {
+#    set additional_flags "additional_flags=-fpic"
+#}
+#if {[gdb_compile "${srcdir}/${subdir}/${libfile}1.c" "${objdir}/${subdir}/${libfile}1.o" object [list debug $additional_flags]] != ""} {
+#    perror "Couldn't compile ${libfile}1.c"
+#    return -1
+#}
+
+#if [istarget "hppa*-hp-hpux*"] then {
+#    remote_exec build "ld -b ${objdir}/${subdir}/${libfile}1.o -o ${objdir}/${subdir}/${libfile}1.sl"
+#} else {
+#    set additional_flags "additional_flags=-shared"
+#    gdb_compile "${objdir}/${subdir}/${libfile}1.o" "${objdir}/${subdir}/${libfile}1.sl" executable [list debug $additional_flags]
+#}
+
+# Build the test case
+#remote_exec build "$CC -Aa -g ${srcfile} ${libfile}1.sl -o ${binfile}"
+
+
+#if {$hp_cc_compiler} {
+#    set additional_flags "additional_flags=-Ae"
+#} else {
+#    set additional_flags ""
+#}
+#if {[gdb_compile "${srcdir}/${subdir}/${srcfile} ${objdir}/${subdir}/${libfile}1.sl" "${binfile}" executable [list debug $additional_flags]] != ""} {
+#    perror "Couldn't build ${binfile}"
+#    return -1
+#}
+
+#cd ..
+
+# Start with a fresh gdb
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+# This program implicitly loads SOM shared libraries.  We wish to test
+# whether a user can set breakpoints in a shlib before running the
+# program, where the program doesn't directly call the shlib, but
+# indirectly does via passing its address to another function.
+#
+# ??rehrauer: Currently, this doesn't work, but we do catch the case
+# and explicitly disallow it.  The reason it fails appears to be that
+#
+#  [1] gdb consults only the linker symbol table in this scenario, and
+#  [2] For a shlib function that is only indirectly called from the
+#      main a.out, there is in the linker symbol table a stub whose
+#      address is negative.  Possibly this is to be interpreted as
+#      an index into the DLT??
+#
+#send "break solib_main\n"
+#expect {
+#  -re "Cannot break on solib_main without a running program.*$gdb_prompt"\
+#          {pass "break on indirect solib call before running"}
+#  -re "Breakpoint.*deferred.*\\(\"solib_main\" was not found.*$gdb_prompt"\
+#	  {pass "break on indirect solib call before running 2"}
+#  timeout {fail "(timeout) break on indirect solib call before running"}
+#}
+
+# However, if we do run to the program's main, we then ought to be
+# able to set a breakpoint on the indirectly called function.  (Apparently,
+# once the inferior is running, gdb consults the debug info rather than
+# the linker symbol table, and is able to find the correct address.)
+#
+#if ![runto_main] then { fail "indirect solib call tests suppressed" }
+
+gdb_test "b main" ""
+gdb_test "c" ""
+# Verify that we can step over the first shlib call.
+#
+send "break solib_main\n"
+expect {
+  -re ".*\[Bb\]reakpoint \[0-9\]* at 0x\[0-9a-fA-F\]*: file.*${libfile}1.c.*$gdb_prompt"\
+          {pass "break on indirect solib call after running"}
+  timeout {fail "(timeout) break on indirect solib call after running"}
+}
+
+gdb_exit
+exit $GRET
+
+interact

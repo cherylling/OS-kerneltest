@@ -1,0 +1,374 @@
+#!/usr/bin/expect -f 
+# Copyright 2011-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set testfile "info-macros"
+set srcfile ${testfile}.c
+set binfile ${testfile}
+#get_compiler_info ${binfile}
+#if [test_compiler_info gcc*] {
+#    lappend options additional_flags=-g3
+#} else {
+#  untested ${testfile}.exp
+#  return -1
+#}
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile} ${srcfile} $options] } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip send_user failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+if ![runto_main] {
+#    untested ${testfile}.exp
+    exit -1
+}
+
+# Test various error messages.
+gdb_test "info macro -- -all" \
+	 "The symbol `-all' has no definition .*at .*$srcfile:\[0-9\]+" \
+	 "info macro -- -all"
+gdb_test "info macro  -- -all" \
+	 "The symbol `-all' has no definition .*at .*$srcfile:\[0-9\]+" \
+	 "info macro  -- -all"
+
+gdb_test "info macro -all --" \
+	 "You must follow.*with the name.*you want to see.*\[^\r\n\]*\[\r\n\]" \
+	 "info macro -all --"
+
+gdb_test "info macro -all  --" \
+	 "You must follow.*with the name.*you want to see.*\[^\r\n\]*\[\r\n\]" \
+	 "info macro -all  --"
+
+gdb_test "info macro  -all  --" \
+	 "You must follow.*with the name.*you want to see.*\[^\r\n\]*\[\r\n\]" \
+	 "info macro  -all  --"
+
+gdb_test "info macro --" \
+	 "You must follow.*with the name.*you want to see.*\[^\r\n\]*\[\r\n\]" \
+	 "info macro --"
+
+gdb_test "info macro -- " \
+	 "You must follow.*with the name.*you want to see.*\[^\r\n\]*\[\r\n\]" \
+	 "'info macro -- '"
+gdb_test "info macro  -- " \
+	 "You must follow.*with the name.*you want to see.*\[^\r\n\]*\[\r\n\]" \
+	 "'info macro  -- '"
+
+gdb_test "info macro -invalid-option" \
+	 "Unrecognized option.*Try \"help info macro\"\." \
+	 "info macro -invalid-option 1"
+
+gdb_test "info macro  -invalid-option" \
+	 "Unrecognized option.*Try \"help info macro\"\." \
+	 "info macro  -invalid-option"
+
+gdb_test "info macro -invalid-option FOO" \
+	 "Unrecognized option.*Try \"help info macro\"\." \
+	 "info macro -invalid-option FOO"
+gdb_test "info macro  -invalid-option FOO" \
+	 "Unrecognized option.*Try \"help info macro\"\." \
+	 "info macro  -invalid-option FOO"
+
+# Single macro lookups.
+gdb_test "info macro -- FOO" \
+	 ".*#define FOO \"hello\"" \
+	 "info macro -- FOO"
+
+gdb_test "info macro  -- FOO" \
+	 ".*#define FOO \"hello\"" \
+	 "info macro  -- FOO"
+
+gdb_test "info macro --  FOO" \
+	 ".*#define FOO \"hello\"" \
+	 "info macro --  FOO"
+
+gdb_test "info macro FOO" \
+	 ".*#define FOO \"hello\"" \
+	 "info macro FOO"
+
+gdb_test "info macro  FOO" \
+	 ".*#define FOO \"hello\"" \
+	 "info macro  FOO"
+
+# Multiple macro lookups.
+set test "info macro -a FOO"
+set r1 ".*#define FOO \"hello\""
+set r2 ".*#define FOO \" \""
+set r3 ".*#define FOO \"world\""
+set r4 ".*#define FOO\\(a\\) foo = a"
+set testname "$test 1"
+gdb_test "$test" "$r1$r2$r3$r4" "$testname"
+
+set test "info macro -a -- FOO"
+set testname "$test 1"
+gdb_test "$test" "$r1$r2$r3$r4" "$testname"
+
+set test "info macro -all -- FOO"
+set testname "$test 1"
+gdb_test "$test" "$r1$r2$r3$r4" "$testname"
+
+set test "info macro -a  --  FOO"
+set testname "$test"
+gdb_test "$test" "$r1$r2$r3$r4" "$testname"
+
+set test "info macro  -a  --  FOO"
+set testname "$test"
+gdb_test "$test" "$r1$r2$r3$r4" "$testname"
+
+set test "info macros"
+set r1 ".*#define FOO \"hello\""
+set r2 ".*#define ONE"
+set r3 ".*$gdb_prompt"
+set timeout 5
+set testname "$test 2"
+send "$test\n"
+expect {
+  -re "$r1$r2$r3" {
+#     pass $testname
+  }
+  -re ".*#define TWO.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define THREE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOUR.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  timeout {
+    send_user "timeout 180"
+    set GRET [expr $GRET + 1]
+  }
+}
+gdb_test "next" ".*" ""
+
+set r1 ".*#define FOO \" \""
+set r2 ".*#define ONE"
+set r3 ".*#define TWO"
+set r4 ".*$gdb_prompt"
+set testname "$test 3"
+send "$test\n"
+expect {
+  -re ".*#define THREE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOUR.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re "$r1$r2$r3$r4" {
+#     pass $testname
+  }
+  timeout {
+    send_user "timeout 205"
+  set GRET [expr $GRET + 1]
+  }
+}
+gdb_test "next" ".*" ""
+
+# in alpabetical order...
+set r1 ".*#define FOO \"world\""
+set r2 ".*#define ONE"
+set r3 ".*#define THREE"
+set r4 ".*#define TWO"
+set r5 ".*$gdb_prompt"
+set testname "$test 4"
+send "$test\n"
+expect {
+  -re ".*#define FOUR.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re "$r1$r2$r3$r4$r5" {
+#     pass $testname
+  }
+  timeout {
+    send_user "timeout 226"
+    set GRET [expr $GRET + 1]
+  }
+}
+# same as above with a linespec.
+set test "info macros *\$pc"
+send "$test\n"
+expect {
+  -re ".*#define FOUR.*$gdb_prompt" {
+     send_user "fail $test"
+  }
+  -re "$r1$r2$r3$r4$r5" {
+#     pass $test
+  }
+  timeout {
+    send_user "timeout 242"
+    set GRET [expr $GRET + 1]
+  }
+}
+gdb_test "next" ".*" ""
+
+set r1 ".*#define FOO \" \""
+set r2 ".*#define ONE"
+set r3 ".*#define TWO."
+set r4 ".*$gdb_prompt"
+set test "info macros"
+set testname "$test 5"
+send "$test\n"
+expect {
+  -re ".*#define THREE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOUR.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re "$r1$r2$r3$r4" {
+#     pass $testname
+  }
+  timeout {
+    send_user "timeout 270"
+    set GRET [expr $GRET + 1]
+  }
+}
+gdb_test "next" ".*" ""
+gdb_test "next" ".*" ""
+
+set r1 ".*#define DEF_MACROS"
+set r2 ".*$gdb_prompt"
+set testname "$test 6"
+send "$test\n" 
+expect {
+  -re ".*#define FOO \" \".*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOO \"hello\".*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOO \"world\".*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOO\\(a\\) foo = a.*" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define ONE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define TWO.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define THREE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOUR.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re "$r1$r2" {
+#     pass $testname
+  }
+  timeout {
+    send_user "timeout 318"
+    set GRET [expr $GRET + 1]
+  }
+}
+
+gdb_test "next" ".*" ""
+set r1 ".*#define DEF_MACROS"
+set r2 ".*#define FOO\\(a\\) foo = a"
+set r3 ".*#define FOUR"
+set r4 ".*$gdb_prompt"
+set testname "$test 7"
+send "$test\n"
+expect {
+  -re ".*#define FOO \" \".*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOO \"hello\".*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define FOO \"world\".*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define ONE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define TWO.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re ".*#define THREE.*$gdb_prompt" {
+     send_user "fail $testname"
+     set GRET [expr $GRET + 1]
+  }
+  -re "$r1$r2$r3$r4" {
+#     pass $testname
+  }
+  timeout {
+  send_user "timeout 259"
+  set GRET [expr $GRET + 1]
+  }
+}
+
+set test "info macros info-macros.c:42"
+
+set r1 ".*define DEF_MACROS"
+set r2 ".*define ONE"
+# info macros on the line where the #define or #include is
+# send_user "fails to find the macro defined (though it works on the next line.)
+#setup_ksend_user "fail "gdb/NNNN" *-*-*
+gdb_test "$test" "$r1$r2" "$test"
+exit $GRET
+
+interact

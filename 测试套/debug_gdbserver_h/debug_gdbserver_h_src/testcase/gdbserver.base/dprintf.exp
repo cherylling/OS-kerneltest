@@ -1,0 +1,201 @@
+#!/usr/bin/expect -f
+#   Copyright (C) 2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "dprintf"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if { [prepare_for_testing dprintf.exp "dprintf" {} {debug}] } {
+#    return -1
+#}
+
+#set srcfile dprintf.c
+
+set bp_location1 [gdb_get_line_number "set breakpoint 1 here"]
+set dp_location1 [gdb_get_line_number "set dprintf 1 here"]
+
+#if ![runto main] {
+#    return -1
+#}
+
+gdb_test "b main"  ""
+gdb_test "c" ""
+
+if { $ARCH == "powerpc" } {
+
+gdb_test "dprintf" "Undefined command: \"dprintf\".  Try \"help\".*"
+gdb_test "dprintf foo" "Undefined command: \"dprintf\".  Try \"help\".*"
+gdb_test "dprintf 29" "Undefined command: \"dprintf\".  Try \"help\".*"
+
+delete_breakpoints
+gdb_breakpoint "main"
+
+gdb_test "dprintf foo,\"At foo entry\\n\"" \
+  "Undefined .*"
+gdb_test "dprintf $dp_location1,\"arg=%d, g=%d\\n\", arg, g" \
+  "Undefined .*"
+gdb_test "break $bp_location1" \
+  "Breakpoint .*"
+
+gdb_test "continue" \
+".*Breakpoint ${decimal}, foo.*set breakpoint.*"
+gdb_test "continue" \
+".*Breakpoint ${decimal}, foo.*set breakpoint.*"
+} else {
+
+gdb_test "dprintf" "Format string required"
+gdb_test "dprintf foo" "Format string required"
+gdb_test "dprintf 29" "Format string required"
+
+delete_breakpoints
+gdb_breakpoint "main"
+
+gdb_test "dprintf foo,\"At foo entry\\n\"" \
+  "Dprintf .*"
+  gdb_test "dprintf $dp_location1,\"arg=%d, g=%d\\n\", arg, g" \
+  "Dprintf .*"
+    gdb_test "break $bp_location1" \
+  "Breakpoint .*"
+#gdb_run_cmd
+#gdb_test "c" "Breakpoint"
+gdb_test "continue" "At foo entry.*arg=1234, g=1234.*" "1st dprintf, gdb"
+gdb_test "continue" "At foo entry.*arg=1235, g=2222.*" "2nd dprintf, gdb"
+}
+
+#gdb_run_cmd
+
+#gdb_test "c" "Breakpoint"
+
+gdb_test "continue" "At foo entry.*arg=1234, g=1234.*" "1st dprintf, gdb"
+
+gdb_test "continue" "At foo entry.*arg=1235, g=2222.*" "2nd dprintf, gdb"
+
+# The "call" style depends on having I/O functions available, so test.
+
+#    gdb_test_no_output "set dprintf-style call" "Set dprintf style to call"
+
+
+#    gdb_test "c" "Breakpoint"
+
+#   gdb_test "continue" "At foo entry.*arg=1234, g=1234.*" "1st dprintf, call"
+
+#   gdb_test "continue" "At foo entry.*arg=1235, g=2222.*" "2nd dprintf, call"
+
+#   gdb_test_no_output "set dprintf-function fprintf" "Set dprintf function"
+#   gdb_test_no_output "set dprintf-channel stderr" "Set dprintf channel"
+
+
+#   gdb_test "c" "Breakpoint"
+
+#   gdb_test "continue" "At foo entry.*arg=1234, g=1234.*" \
+#"1st dprintf, fprintf"
+#
+#   gdb_test "continue" "At foo entry.*arg=1235, g=2222.*" \
+#"2nd dprintf, fprintf"
+#}
+
+set target_can_dprintf 1
+set msg "Set dprintf style to agent"
+send "set dprintf-style agent\n"
+expect {
+    -re "warning: Target cannot run dprintf commands.*\r\n$gdb_prompt" {
+	set target_can_dprintf 0
+	pass "$msg - cannot do"
+    }
+    -re ".*$gdb_prompt" {
+	pass "$msg - can do"
+    }
+}
+
+#if $target_can_dprintf {
+
+#    gdb_run_cmd
+
+#    gdb_test "c" "Breakpoint"
+
+#    gdb_test "continue" "Breakpoint \[0-9\]+, foo .*" "1st dprintf, agent"
+
+#    gdb_test "continue" "Breakpoint \[0-9\]+, foo .*" "2nd dprintf, agent"
+
+#}
+
+if { $ARCH == "powerpc" } {
+ gdb_test "set dprintf-style foobar" "No symbol \"style\" in current context.*"
+} else {
+gdb_test "set dprintf-style foobar" "Undefined item: \"foobar\"." \
+    "Set dprintf style to an unrecognized type"
+}
+
+gdb_exit
+exit $GRET
+
+interact

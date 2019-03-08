@@ -1,0 +1,45 @@
+Breakpoint 1 at 0x8728: file v1r3c00_gdb-long-hwbpoint_tc006.c, line 58.
+
+58	    if (argc != 2) {
+Breakpoint 2 at 0x8858: file v1r3c00_gdb-long-hwbpoint_tc006.c, line 75.
+
+75	    addr[2]='c';
+Num     Type           Disp Enb Address    What
+1       breakpoint     keep y   0x00008728 in main at v1r3c00_gdb-long-hwbpoint_tc006.c:58
+	breakpoint already hit 1 time
+2       breakpoint     keep y   0x00008858 in main at v1r3c00_gdb-long-hwbpoint_tc006.c:75
+	breakpoint already hit 1 time
+Hardware long mem watchpoint 3: *0x40000000
+Hardware long mem read watchpoint 4: *0x80000000
+Hardware long mem access (read/write) watchpoint 5: *0x90000000
+Hardware long mem watchpoint 3: *0x40000000
+
+MEM WPT triggered at : 0x40000002
+Now value (align to 0x40000000)= 808477488
+76	    addr[length/3*2-2]='a';
+Hardware long mem watchpoint 3: *0x40000000
+
+MEM WPT triggered at : 0x7ffffffe
+Now value (align to 0x7ffffffc)= 808476976
+77	    printf("%c\n",addr[length/3*2+3]);
+Hardware long mem read watchpoint 4: *0x80000000
+
+MEM RWPT triggered at : 0x80000003
+Value (align to 0x80000000)= 808464432
+77	    printf("%c\n",addr[length/3*2+3]);
+Hardware long mem access (read/write) watchpoint 5: *0x90000000
+
+MEM AWPT triggered at : 0x90000000
+Now value (align to 0x90000000)= 1647325232
+80	    addr[length/6*5+1]='b';
+Hardware long mem access (read/write) watchpoint 5: *0x90000000
+
+MEM AWPT triggered at : 0x90000001
+Now value (align to 0x90000000)= 1650602032
+82	    printf("set value pass \n");
+Breakpoint 6 at 0x89c8: file v1r3c00_gdb-long-hwbpoint_tc006.c, line 84.
+
+84	    char *err_str="dafaga";
+
+Program received signal SIGSEGV, Segmentation fault.
+87	    err_str[1]='x';

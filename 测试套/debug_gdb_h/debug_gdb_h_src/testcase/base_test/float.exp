@@ -1,0 +1,126 @@
+#!/usr/bin/expect -f 
+# Copyright 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Please email any bugs, comments, and/or additions to this file to:
+# bug-gdb@gnu.org
+
+# This file is part of the gdb testsuite.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+send  "uname -m \n"
+expect {
+    -timeout 5
+        -re "x86_64*" { set processor_type "x86_64" }
+    -re "aarch64*" { set processor_type "aarch64" }
+    -re "arm*" { set processor_type "arm" }
+    -re "ppc*" { set processor_type "powerpc" }
+    timeout {
+        send_user "\n*****error: get type error*****\n"
+            set GRET [expr $GRET + 1]
+            exit 1
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd $target_prompt" "$target_prompt*"
+#if $tracelevel {
+#    strace $tracelevel
+#}
+
+#
+# Test floating-point related functionality.
+#
+
+
+#if { [prepare_for_testing float.exp float float.c] } {
+#    return -1
+#}
+
+set TMPGRET $GRET
+# Set it up at a breakpoint so we have its registers.
+
+set GRET $TMPGRET
+
+gdb_test "'$GDB_TOOL_DIR'gdb float" "$gdb_prompt"
+gdb_test_no_output "set height 5000"
+
+if ![runto_main] then {
+    send_user "couldn't run to breakpoint"
+    exit -1
+}
+
+# Test "info float".
+
+if [string match "aarch64" $processor_type] {
+    gdb_test "info float" ".*d1.*d31.*s0.*s1.*s31" "info float"
+    }
+
+if [string match "arm" $processor_type] {
+    send "info float\n"
+    expect {
+    -timeout 5
+	-re "Software FPU type.*mask:.*flags:" {
+	    send_user "pass info float (FPA)"
+	}
+	-re "fpscr.*s0.*s1.*s20" {
+	    # Only check for single precision; d0 might be a vector register
+	    # if we have NEON.
+	    send_user "pass info float (VFP)"
+	}
+    -re "No floating.point info available for this processor.*" {
+        send_user "pass info float (without FPU)"
+	}
+    timeout {
+        send_user "fail for arm"
+        set GRET [expr $GRET + 1]
+    }
+    }
+} 
+
+if [string match "x86_64" $processor_type] {
+    gdb_test "info float" "R7:.*Status Word:.*Opcode:.*" "info float"
+}
+
+gdb_test ""
+gdb_test "step"
+#gdb_test "finish" "Value returned is .* = (inf|nan).*"
+gdb_test "finish" "Value returned is*"
+exit $GRET
+
+interact

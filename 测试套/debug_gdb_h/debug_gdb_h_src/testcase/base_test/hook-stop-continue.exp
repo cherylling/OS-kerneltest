@@ -1,0 +1,97 @@
+#!/usr/bin/expect -f
+
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+	-timeout 2
+	-re "$target_prompt*" {}
+	timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+	}
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+set testfile "hook-stop-continue"
+set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if { [prepare_for_testing ${testfile}.exp "${testfile}" "${testfile}.c" {debug nowarnings}] } {
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT*"
+
+if ![runto_main] then {
+    perror "Couldn't run to main"
+}
+
+set bp_location [gdb_get_line_number "set breakpoint here"]
+
+gdb_test "break $bp_location" \
+    "Breakpoint.*at.* file .*$srcfile, line $bp_location\\." \
+    "breakpoint line number"
+
+gdb_test "print \$do_continue = 1" "1"
+gdb_test "define hook-stop" "Type commands for definition of \"hook-stop\".*End with a lin.*end"
+gdb_test "if \$do_continue\nset \$do_continue = 0\ncontinue\nend\nend\n" "$GDBPROMPT*"
+
+#send_gdb "define hook-stop\n"
+#gdb_expect {
+#  -re "Type commands for definition of \"hook-stop\".*End with a line saying just \"end\"." {
+#	  send_gdb "if \$do_continue\nset \$do_continue = 0\ncontinue\nend\nend\n"
+#           gdb_expect {
+#             -re "$gdb_prompt" {}
+#             timeout {
+#				 fail "(timeout) define hook-stop command"
+#				 send_user "\n******error:define hook-stop failed*****\n"
+#			 }
+#           }
+#          }
+#  timeout {
+##	  fail "(timeout) define hook-stop command"
+#	  send_user "\n*****error:define hook-stop failed*****\n"
+#  }
+#}
+
+gdb_test "next" "Breakpoint.*funbreak \\(i=5\\) at .*:$bp_location\r\n$bp_location.*set breakpoint here \\*/" \
+    "next triggering hook-stop"
+
+gdb_test "next" "i = i \\+ 10;" "next no hook-stop"
+
+exit $GRET
+interact

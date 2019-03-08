@@ -1,0 +1,91 @@
+#!/usr/bin/expect -f
+#######################################################################
+##- @Copyright (C), 1988-2013, Huawei Tech. Co., Ltd.
+##- @Suitename: debug_gdbshell_h
+##- @Name: gdbshell_v1r2c00_rtat-gdb-set_tc004
+##- @Author: l00191161
+##- @Date: 2013-10-17
+##- @Precon: 支持gdbshell
+##- @Brief: rtat设置功能验证
+##- @Detail: 1，启动多进程多线程，
+#            2，gdbshell rtat其中某个进程，info set查看是否正确设置了这3个指令set target-async 1；set pagination off；set non-stop on
+#            3,退出
+##- @Expect: rtat后3个指令设置正确
+##- @Level: Level 2
+##- @Auto: True
+##- @Modify:
+#######################################################################*/
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdbshell_test/gdbshell" "$target_prompt"
+global testpid
+global binfile
+set binfile thread_test
+set testpid 0
+gdb_test "killall $binfile"
+sleep 1
+gdb_test "./$binfile &" "$target_prompt"
+send "ps -ef | grep $binfile |grep -v \"grep $binfile\"|sed -n 1p |awk '\{print \$2\}'\n"
+expect {
+    -timeout 2
+        -re "(\[0-9\]+)\r\n" {
+            set testpid $expect_out(1,string)
+        }
+    timeout {
+        send_user "fail \n"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+send_user "testpid=$testpid \n"
+
+if { $testpid == 0 } {
+     set GRET [expr $GRET + 1]
+     exit $GRET
+}
+
+set target_prompt "/tmp/for_gdbshell_test/gdbshell"
+gdb_test "'$GDB_TOOL_DIR'gdbshell" "$gdb_prompt"
+
+# TC4 TC5 check rtat setting
+gdb_test "set target-async 0" "$gdb_prompt"
+gdb_test "set pagination on" "$gdb_prompt"
+gdb_test "set non-stop off" "$gdb_prompt"
+gdb_test "rtat $testpid" "gdbshellagent.*$gdb_prompt"
+
+gdb_test "set heigh 500" "$gdb_prompt"
+gdb_test "show non-stop" "Controlling the inferior in non-stop mode is on."
+gdb_test "show pagination" "State of pagination is off."
+gdb_test "show target-async" "asynchronous mode is on."
+
+
+gdb_test "detach" "Detaching from program:.*process $testpid"
+
+gdb_exit
+gdb_test "killall thread_test" "$target_prompt"
+sleep 1
+exit $GRET
+
+interact

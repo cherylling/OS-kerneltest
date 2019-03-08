@@ -1,0 +1,205 @@
+#!/usr/bin/expect -f
+#   Copyright 1988, 1990-1992, 1994-2000, 2002-2003, 2007-2012 Free
+#   Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Rob Savoye. (rob@cygnus.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "break"
+set srcfile break.c
+set srcfile1 break1.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if { [prepare_for_testing break.exp "break" {break.c break1.c} {debug nowarnings}] } {
+#    return -1
+#}
+#
+# test simple breakpoint setting commands
+#
+
+# Test deleting all breakpoints when there are none installed,
+# GDB should not prompt for confirmation.
+# Note that lib/gdb.exp provides a "delete_breakpoints" proc
+# for general use elsewhere.
+
+send "delete breakpoints\n"
+expect {
+     -re "Delete all breakpoints.*" {
+	    send "y\n"
+	    expect {
+		-re "$gdb_prompt" {
+		    fail "Delete all breakpoints when none (unexpected prompt)"
+		}
+		timeout	{ fail "Delete all breakpoints when none (timeout after unexpected prompt)" }
+	    }
+	}
+     -re ".*$gdb_prompt"       { pass "Delete all breakpoints when none" }
+    timeout	            { fail "Delete all breakpoints when none (timeout)" }
+}
+
+set bp_location1 [gdb_get_line_number "set breakpoint 1 here"]
+set bp_location2 [gdb_get_line_number "set breakpoint 2 here"]
+set bp_location3 [gdb_get_line_number "set breakpoint 3 here"]
+set bp_location4 [gdb_get_line_number "set breakpoint 4 here"]
+set bp_location6 [gdb_get_line_number "set breakpoint 6 here"]
+set main_line $bp_location6
+set bp_location7 [gdb_get_line_number "set breakpoint 7 here"]
+set bp_location8 [gdb_get_line_number "set breakpoint 8 here" $srcfile1]
+set bp_location9 [gdb_get_line_number "set breakpoint 9 here" $srcfile1]
+set bp_location10 [gdb_get_line_number "set breakpoint 10 here"]
+set bp_location10a [gdb_get_line_number "set breakpoint 10a here"]
+set bp_location11 [gdb_get_line_number "set breakpoint 11 here"]
+
+set bp_location12 [gdb_get_line_number "set breakpoint 12 here"]
+set proto ""
+
+proc test_next_with_recursion {} { 
+    global gdb_prompt
+    global decimal
+    global binfile
+
+#    gdb_test "kill" "" "kill program" "Kill the program being debugged.*y or n. $" "y"
+    delete_breakpoints
+
+    gdb_test "break factorial" "Breakpoint $decimal at .*" "break at factorial"
+
+    # Run until we call factorial with 6
+
+    send "c\n"
+    expect {
+	-re "Break.* factorial .value=6. .*$gdb_prompt" {}
+	timeout { fail "run to factorial(6) (timeout)" ;  }
+    }
+
+    # Continue until we call factorial recursively with 5.
+
+    if [gdb_test "continue" \
+	"Continuing.*Break.* factorial .value=5. .*" \
+	"continue to factorial(5)"] then {  }
+
+    # Do a backtrace just to confirm how many levels deep we are.
+
+    if [gdb_test "backtrace" \
+	"#0\[ \t\]+ factorial .value=5..*" \
+	"backtrace from factorial(5)"] then {  }
+
+    # Now a "next" should position us at the recursive call, which
+    # we will be performing with 4.
+
+    if [gdb_test "next" \
+	".* factorial .value - 1.;.*" \
+	"next to recursive call"] then {  }
+
+    # Disable the breakpoint at the entry to factorial by deleting them all.
+    # The "next" should run until we return to the next line from this
+    # recursive call to factorial with 4.
+    # Buggy versions of gdb will stop instead at the innermost frame on
+    # the line where we are trying to "next" to.
+
+    delete_breakpoints
+
+#    if [istarget "mips*tx39-*"] {
+#	set timeout 60
+#    }
+    # We used to set timeout here for all other targets as well.  This
+    # is almost certainly wrong.  The proper timeout depends on the
+    # target system in use, and how we communicate with it, so there
+    # is no single value appropriate for all targets.  The timeout
+    # should be established by the Dejagnu config file(s) for the
+    # board, and respected by the test suite.
+    #
+    # For example, if I'm running GDB over an SSH tunnel talking to a
+    # portmaster in California talking to an ancient 68k board running
+    # a crummy ROM monitor (a situation I can only wish were
+    # hypothetical), then I need a large timeout.  But that's not the
+    # kind of knowledge that belongs in this file.
+
+    gdb_test next "\[0-9\]*\[\t \]+return \\(value\\);.*" \
+	    "next over recursive call"
+
+    # OK, we should be back in the same stack frame we started from.
+    # Do a backtrace just to confirm.
+
+    set result [gdb_test "backtrace" \
+	    "#0\[ \t\]+ factorial .value=120.*\r\n#1\[ \t\]+ \[0-9a-fx\]+ in factorial .value=6..*" \
+	    "backtrace from factorial(5.1)"]
+    if { $result != 0 } {  }
+
+#    if [target_info exists gdb,noresults] {  }
+     gdb_continue_to_end "recursive next test"
+#   gdb_stop_suppressing_tests;
+}
+
+test_next_with_recursion
+
+gdb_exit
+exit $GRET
+
+interact

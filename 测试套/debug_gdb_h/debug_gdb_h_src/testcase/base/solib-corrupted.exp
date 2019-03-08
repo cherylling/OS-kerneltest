@@ -1,0 +1,93 @@
+#!/usr/bin/expect -f 
+# Copyright 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if {[skip_shlib_tests]} {
+#    return 0
+#}
+
+#if {[is_remote target]} {
+    # gdbserver prints the warning message but expect is parsing only the GDB
+    # output, not the gdbserver output.
+#    return 0
+#}
+
+set testfile "solib-corrupted"
+set srcfile start.c
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile} ${srcfile}] } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+if ![runto_main] {
+    send_user "Can't run to main"
+    exit -1
+}
+
+gdb_test "info sharedlibrary" "From * To .*" "normal list"
+
+# GDB checks there for matching L_PREV.
+set test "make solibs looping"
+send "p/x _r_debug->r_map->l_next = _r_debug->r_map\n"
+expect {
+    -re "(No symbol \"_r_debug\" in current context\\.|Attempt to extract a component of a value that is not a structure pointer\\.).*$gdb_prompt" {
+	# glibc debug info is not available and it is too difficult to find and
+	# parse it from this testcase without the gdb supporting functions.
+#	verbose -log "no _r_debug symbol has been found"
+	send_user "xfail $test"
+#	untested ${testfile}.exp
+#	exit -2
+        set GRET [expr $GRET + 1]
+    }
+    -re " = 0x\[0-9a-f\]+.*$gdb_prompt" {
+	send_user "pass $test"
+    }
+    timeout {
+        send_user "timeout "
+        set GRET [expr $GRET + 1]
+    }
+}
+gdb_test "info sharedlibrary" "warning: Corrupted shared library list: .*" "corrupted list"
+exit $GRET
+
+interact

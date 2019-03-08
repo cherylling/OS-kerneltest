@@ -1,0 +1,91 @@
+spawn ssh root@192.168.0.234
+You are trying to access a restricted zone. Only Authorized Users allowed.
+
+Hello! Welcome to RTOS!
+
+[32mUSP ~[m # cd /mnt/nfs
+[32mUSP /mnt/nfs[m # gdb call-strs
+set print sevenbit-strings
+GNU gdb (GDB) 7.4
+Copyright (C) 2012 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "arm-linux-gnueabi".
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>...
+Reading symbols from /mnt/nfs/call-strs...done.
+[?1034h(gdb) set print sevenbit-strings
+(gdb) set print address off
+(gdb) set width 0
+(gdb) b main
+Breakpoint 1: file call-strs.c, line 72.
+(gdb) r
+Starting program: /mnt/nfs/call-strs 
+
+Breakpoint 1, main () at call-strs.c:72
+72	  s = &buf[0];
+(gdb) step
+73	  strcpy(buf, "test string");
+(gdb) next
+74	  str_func("abcd", "efgh", "ijkl", "mnop", "qrst", "uvwx", "yz12");
+(gdb) print buf
+$1 = "test string", '\000' <repeats 88 times>
+(gdb) print s
+$2 = "test string"
+(gdb) print str_func1(s)
+first string arg is: test string
+$3 = "test string"
+(gdb) print str_func1("test string")
+first string arg is: test string
+$4 = "test string"
+(gdb) call str_func1(s)
+first string arg is: test string
+$5 = "test string"
+(gdb) call str_func1("test string")
+first string arg is: test string
+$6 = "test string"
+(gdb) print str_func1(buf)
+first string arg is: test string
+$7 = "test string"
+(gdb) call str_func1(buf)
+first string arg is: test string
+$8 = "test string"
+(gdb) print str_func("a","b","c","d","e","f","g")
+first string arg is: a
+second string arg is: b
+third string arg is: c
+fourth string arg is: d
+fifth string arg is: e
+sixth string arg is: f
+seventh string arg is: g
+$9 = "abcdefg"
+(gdb) call str_func("a","b","c","d","e","f","g")
+first string arg is: a
+second string arg is: b
+third string arg is: c
+fourth string arg is: d
+fifth string arg is: e
+sixth string arg is: f
+seventh string arg is: g
+$10 = "abcdefg"
+(gdb) print str_func(s,s,s,s,s,s,s)
+first string arg is: test string
+second string arg is: test string
+third string arg is: test string
+fourth string arg is: test string
+fifth string arg is: test string
+sixth string arg is: test string
+seventh string arg is: test string
+$11 = "test stringtest stringtest stringtest stringtest stringtest stringtest string"
+(gdb) call str_func(s,s,s,s,s,s,s)
+first string arg is: test string
+second string arg is: test string
+third string arg is: test string
+fourth string arg is: test string
+fifth string arg is: test string
+sixth string arg is: test string
+seventh string arg is: test string
+$12 = "test stringtest stringtest stringtest stringtest stringtest stringtest string"
+(gdb) 

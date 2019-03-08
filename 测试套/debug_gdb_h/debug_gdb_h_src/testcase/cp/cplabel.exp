@@ -1,0 +1,71 @@
+#!/usr/bin/expect -f 
+# Copyright 2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Tests for breakpoint on labels in methods.
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+
+#if {[skip_cplus_tests]} { continue }
+
+#standard_testfile .cc
+
+#if {[prepare_for_testing "$testfile.exp" $testfile $srcfile {c++ debug}]} {
+#    return -1
+#}
+set testfile cplabel
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+if {![runto_main]} {
+    untested "could not run to main"
+    exit 1
+}
+
+set methods {"bar" "baz"}
+set labels {"to_the_top" "get_out_of_here"}
+
+foreach m $methods {
+    foreach l $labels {
+	set line [gdb_get_line_number "$m:$l"]
+	gdb_test "break foo::$m:$l" \
+	    "Breakpoint $decimal at $hex: file .*/$srcfile, line $line\."
+    }
+}
+exit $GRET
+
+interact

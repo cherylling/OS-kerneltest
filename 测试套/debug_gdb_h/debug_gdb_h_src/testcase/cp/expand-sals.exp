@@ -1,0 +1,77 @@
+#!/usr/bin/expect -f 
+# Copyright 2009-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#if { [skip_cplus_tests] } { continue }
+ 
+set testfile expand-sals
+set srcfile expand-sals.cc
+#if { [prepare_for_testing expand-sals.exp expand-sals $srcfile {debug c++}] } {
+#    return -1
+#}
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+if ![runto_main] {
+    exit -1
+}
+
+gdb_breakpoint [gdb_get_line_number "func-line"]
+gdb_continue_to_breakpoint "func" ".*func-line.*"
+
+gdb_test "up" "caller-line.*"
+
+# PC should not be now at the boundary of source lines to make the original bug
+# exploitable.  The GLOBAL_X variable exists in the source for this purpose.
+
+# Original problem was an internal error here.
+set test "break"
+gdb_test "$test" "Breakpoint \[0-9\]+ at .*, line \[0-9\]+\\..*$gdb_prompt" 
+
+gdb_continue_to_breakpoint "caller" ".*caller-line.*"
+
+# Test GDB caught this return call and not the next one through B::B()
+gdb_test "bt" \
+	 "#0 \[^\r\n\]* (A::)?A \[^\r\n\]*\r\n#1 \[^\r\n\]* main \[^\r\n\]*" \
+	 "bt from A"
+
+gdb_continue_to_breakpoint "next caller func" ".*func-line.*"
+exit $GRET
+
+interact

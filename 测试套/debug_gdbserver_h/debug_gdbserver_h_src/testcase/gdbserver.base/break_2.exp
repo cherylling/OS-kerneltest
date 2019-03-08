@@ -1,0 +1,278 @@
+#!/usr/bin/expect -f
+#   Copyright 1988, 1990-1992, 1994-2000, 2002-2003, 2007-2012 Free
+#   Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Rob Savoye. (rob@cygnus.com)
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "break"
+set srcfile break.c
+set srcfile1 break1.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if { [prepare_for_testing break.exp "break" {break.c break1.c} {debug nowarnings}] } {
+#    return -1
+#}
+#
+# test simple breakpoint setting commands
+#
+
+# Test deleting all breakpoints when there are none installed,
+# GDB should not prompt for confirmation.
+# Note that lib/gdb.exp provides a "delete_breakpoints" proc
+# for general use elsewhere.
+
+send "delete breakpoints\n"
+expect {
+     -re "Delete all breakpoints.*" {
+	    send "y\n"
+	    expect {
+		-re "$gdb_prompt" {
+		    fail "Delete all breakpoints when none (unexpected prompt)"
+		}
+		timeout	{ fail "Delete all breakpoints when none (timeout after unexpected prompt)" }
+	    }
+	}
+     -re ".*$gdb_prompt"       { pass "Delete all breakpoints when none" }
+    timeout	            { fail "Delete all breakpoints when none (timeout)" }
+}
+
+set bp_location1 [gdb_get_line_number "set breakpoint 1 here"]
+set bp_location2 [gdb_get_line_number "set breakpoint 2 here"]
+set bp_location3 [gdb_get_line_number "set breakpoint 3 here"]
+set bp_location4 [gdb_get_line_number "set breakpoint 4 here"]
+set bp_location6 [gdb_get_line_number "set breakpoint 6 here"]
+set main_line $bp_location6
+set bp_location7 [gdb_get_line_number "set breakpoint 7 here"]
+set bp_location8 [gdb_get_line_number "set breakpoint 8 here" $srcfile1]
+set bp_location9 [gdb_get_line_number "set breakpoint 9 here" $srcfile1]
+set bp_location10 [gdb_get_line_number "set breakpoint 10 here"]
+set bp_location10a [gdb_get_line_number "set breakpoint 10a here"]
+set bp_location11 [gdb_get_line_number "set breakpoint 11 here"]
+
+if ![runto_main] then { fail "break tests suppressed" }
+gdb_test "c" ""
+
+send "break $bp_location1\n" 
+expect {
+    -re "Breakpoint (\[0-9\]*) at .*, line $bp_location1.*$gdb_prompt" {
+    }
+    timeout {
+    send_user "timeout break $bp_location1"
+    set GRET [expr $GRET + 1]
+    }
+}
+
+send_gdb "commands $expect_out(1,string)\n"
+send "silent\n"
+send "end\n"
+expect {
+  -re ".*$gdb_prompt" {
+  #pass "set silent break bp_location1"
+  }
+  timeout {
+  send_user "(timeout) set silent break bp_location1"
+  set GRET [expr $GRET + 1]
+  }
+}
+
+#gdb_test "break $bp_location1" "Breakpoint (\[0-9\]*) at .*, line $bp_location1.*$gdb_prompt" 
+
+#gdb_test "commands $expect_out(1,string)\nsilent\nend" ">end" "set silent break bp_location1"
+
+gdb_test "info break" \
+    "\[0-9\]*\[ \t\]*breakpoint.*:$bp_location1\r\n\[ \t\]*silent.*" \
+    "info silent break bp_location1"
+
+gdb_test "continue" "Continuing." \
+    "hit silent break bp_location1"
+
+gdb_test "bt" "#0  main .* at .*:$bp_location1.*" \
+    "stopped for silent break bp_location1"
+
+# Verify that GDB can at least parse a breakpoint with the
+# "thread" keyword.  (We won't attempt to test here that a
+# thread-specific breakpoint really triggers appropriately.
+# The gdb.threads subdirectory contains tests for that.)
+#
+set bp_location12 [gdb_get_line_number "set breakpoint 12 here"]
+gdb_test "break $bp_location12 thread 999" "Unknown thread 999.*" \
+    "thread-specific breakpoint on non-existent thread disallowed"
+
+gdb_test "break $bp_location12 thread foo" \
+    "Junk after thread keyword.*" \
+    "thread-specific breakpoint on bogus thread ID disallowed"
+
+# Verify that GDB responds gracefully to a breakpoint command with
+# trailing garbage.
+#
+if { $ARCH == "powerpc" } {
+gdb_test "break $bp_location12 foo" \
+"Junk at end of arguments.*" 
+} else {
+gdb_test "break $bp_location12 foo" \
+    "malformed linespec error: unexpected string, \"foo\".*" \
+    "breakpoint with trailing garbage disallowed"
+}
+
+# Verify that GDB responds gracefully to a "clear" command that has
+# no matching breakpoint.  (First, get us off the current source line,
+# which we know has a breakpoint.)
+#
+gdb_test "next" "marker1.*" "step over breakpoint"
+
+gdb_test "clear 81" "No breakpoint at 81.*" \
+    "clear line has no breakpoint disallowed"
+
+gdb_test "clear" "No breakpoint at this line.*" \
+    "clear current line has no breakpoint disallowed"
+
+# Verify that we can set and clear multiple breakpoints.
+#
+# We don't test that it deletes the correct breakpoints.  We do at
+# least test that it deletes more than one breakpoint.
+#
+gdb_test "break marker3" "Breakpoint.*at.*" "break marker3 #1"
+gdb_test "break marker3" "Breakpoint.*at.*" "break marker3 #2"
+gdb_test "clear marker3" {Deleted breakpoints [0-9]+ [0-9]+.*}
+
+# Verify that a breakpoint can be set via a convenience variable.
+#
+gdb_test_no_output "set \$foo=$bp_location11" \
+    "set convenience variable \$foo to bp_location11"
+
+gdb_test "break \$foo" \
+    "Breakpoint (\[0-9\]*) at .*, line $bp_location11.*" \
+    "set breakpoint via convenience variable"
+
+# Verify that GDB responds gracefully to an attempt to set a
+# breakpoint via a convenience variable whose type is not integer.
+#
+gdb_test_no_output "set \$foo=81.5" \
+    "set convenience variable \$foo to 81.5"
+
+gdb_test "break \$foo" \
+    "Convenience variables used in line specs must have integer values.*" \
+    "set breakpoint via non-integer convenience variable disallowed"
+
+# Verify that we can set and trigger a breakpoint in a user-called function.
+#
+gdb_test "break marker2" \
+    "Breakpoint (\[0-9\]*) at .*, line ($bp_location8|$bp_location9).*" \
+    "set breakpoint on to-be-called function"
+  set proto ""
+gdb_test "print marker2(99)" \
+    "The program being debugged stopped while in a function called from GDB.\r\nEvaluation of the expression containing the function\r\n.marker2$proto. will be abandoned.\r\nWhen the function is done executing, GDB will silently stop.*" \
+    "hit breakpoint on called function"
+
+# As long as we're stopped (breakpointed) in a called function,
+# verify that we can successfully backtrace & such from here.
+#
+# In this and the following test, the _sr4export check apparently is needed
+# for hppa*-*-hpux.
+#
+send "bt\n"
+expect {
+    -re "#0\[ \t\]*($hex in )?marker2.*:($bp_location8|$bp_location9)\r\n#1.*_sr4export.*$gdb_prompt" {
+	pass "backtrace while in called function"
+    }
+    -re "#0\[ \t\]*($hex in )?marker2.*:($bp_location8|$bp_location9)\r\n#1.*function called from gdb.*$gdb_prompt" {
+	pass "backtrace while in called function"
+    }
+    timeout {
+        fail "timeout bt"
+    }
+}
+
+# Return from the called function.  For remote targets, it's important to do
+# this before runto_main, which otherwise may silently stop on the dummy
+# breakpoint inserted by GDB at the program's entry point.
+#
+send "finish\n" 
+expect {
+    -timeout 10
+    -re "Run till exit from .*marker2.* at .*($bp_location8|$bp_location9)\r\n.* in _sr4export.*$gdb_prompt" {
+	pass "finish from called function"
+    }
+    -re "Run till exit from .*marker2.* at .*($bp_location8|$bp_location9)\r\n.*function called from gdb.*$gdb_prompt" {
+	pass "finish from called function"
+    }
+    -re "Run till exit from .*marker2.* at .*($bp_location8|$bp_location9)\r\n.*Value returned.*$gdb_prompt" {
+	pass "finish from called function"
+    }
+    timeout {
+        fail "timeout finish"
+    }
+}
+
+gdb_exit
+exit $GRET
+
+interact

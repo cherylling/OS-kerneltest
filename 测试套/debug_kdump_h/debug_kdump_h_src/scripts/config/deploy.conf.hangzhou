@@ -1,0 +1,59 @@
+[hi1382-hangzhou-umpte:]
+username=root
+password=huawei
+boot_enter_key=s
+boot_keyword=Hi1382 >
+boot_line=ifconfig -s eth0 9.84.64.15 255.255.0.0 9.84.0.1
+boot_line=c
+boot_line=HiFE
+boot_line=0
+boot_line=0
+boot_line=OMC
+boot_line=[kn_file];[fs_file];[dtb_file]
+boot_line=[target_ip]
+boot_line=9.84.1.112
+boot_line=arm64
+boot_line=arm64
+boot_line=0
+boot_line=
+boot_line=
+boot_line=9.84.0.1
+boot_line=
+boot_line=S
+boot_line=p
+boot_line=ifconfig -s eth0 [target_ip] 255.255.0.0  9.84.0.1
+boot_line=0
+boot_line=@
+net_dev=HiFE0
+cfg_line=ping 9.84.1.112 -c 4
+reboot_msg=Bootrom;<Second>;Hi1382 UMPTE BIOS;
+
+[hi1381-hangzhou:]
+
+[hi1381-hangzhou-ci:]
+username=root
+password=huawei
+boot_password=huawei123
+boot_enter_key=s
+boot_keyword=UBBP EFI
+boot_line=c
+boot_line=HiFE
+boot_line=0
+boot_line=0
+boot_line=OMC
+boot_line=[kn_file];[fs_file];[dtb_file]
+boot_line=[target_ip]
+boot_line=9.84.1.112
+boot_line=public
+boot_line=public
+boot_line=0
+boot_line=
+boot_line=
+boot_line=
+boot_line=
+boot_line=S
+boot_line=p
+boot_line=0
+boot_line=@
+net_dev=HiFE0
+cfg_line=ping 9.84.1.112 -c 4

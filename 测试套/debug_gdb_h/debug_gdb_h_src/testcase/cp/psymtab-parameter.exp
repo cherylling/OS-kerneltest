@@ -1,0 +1,71 @@
+#!/usr/bin/expect -f 
+# Copyright 2011-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#if { [skip_cplus_tests] } { continue }
+
+
+set testfile psymtab-parameter
+set executable ${testfile}.x
+set srcfile ${testfile}.cc
+#set binfile ${objdir}/${subdir}/${executable}
+
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" object {debug c++}] != "" } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+#clean_restart $executable
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $executable" "$gdb_prompt"
+
+# As `main' is not present GDB fails to find the proper inferior language.
+gdb_test_no_output "set language c++"
+
+# The goal is to keep the CU (Compilation Unit) unexpanded.  It would be rather
+# XFAIL than FAIL here.  For example -readnow breaks it.
+gdb_test_no_output "maintenance info symtabs"
+
+# GDB has shown only the `long func<short>()' ELF symbol before, not the DWARF
+# symbol
+gdb_test "complete p 'func<short>(" "p 'func<short>\\(\\)"
+exit $GRET
+
+interact

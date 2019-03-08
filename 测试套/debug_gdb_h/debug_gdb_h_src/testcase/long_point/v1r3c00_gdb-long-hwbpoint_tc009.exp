@@ -1,0 +1,41 @@
+#!/usr/bin/expect -f 
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global TEST_LEN TEST_OFFSET
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/long_point"
+gdb_test "cd /tmp/for_gdb_test/long_point" "$target_prompt"
+
+gdb_test "rm -rf gdb.txt compile_txtx"
+gdb_test "'$GDB_TOOL_DIR'gdb -x tc009.ini ./v1r3c00_gdb-long-hwbpoint_tc006"
+
+sleep 20
+gdb_test "cat gdb.txt |grep -v argv|grep -v process > compile_txtx" "$target_prompt"
+gdb_test "diff compile_txt compile_txtx" "$target_prompt"
+gdb_test "echo XX$?" "XX0"
+
+gdb_test "rm -rf gdb.txt compile_txtx"
+
+exit $GRET
+
+interact

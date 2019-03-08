@@ -1,0 +1,65 @@
+#!/usr/bin/expect -f
+
+#   Copyright 1998-1999, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT 
+global target_ip 
+global  target_prompt 
+global BUFFER
+
+spawn ssh root@$target_ip
+
+expect {
+    -timeout 2
+        -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+        }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+            set GRET [expr $GRET + 1]
+    }   
+}
+
+cmd_retkey "cd /tmp/for_gdb_test/base_test" "$target_prompt*"
+cmd_retkey "'$GDB_TOOL_DIR'gdb breakpoint-shadow" "$GDBPROMPT"
+cmd_retkey "set breakpoint always-inserted on" "$GDBPROMPT"
+cmd_retkey "show breakpoint always-inserted" "Always inserted breakpoint mode is on."
+set test "disassembly without breakpoints"
+cmd_retkey "disass main" "Dump of assembler code for function main:\r\n(.*)End of assembler dump."
+set test_buffer1 $BUFFER
+cmd_retkey "b 23" "Breakpoint \[0-9\] at .*" "First breakpoint placed"
+cmd_retkey "b 24" "Breakpoint \[0-9\] at .*" "Second breakpoint placed"
+
+set test "disassembly with breakpoints"
+cmd_retkey "disass main" "Dump of assembler code for function main:\r\n(.*)End of assembler dump."
+set test_buffer2 $BUFFER
+
+send_user "$test_buffer1  ====  $test_buffer2" 
+if [string equal -nocase $test_buffer1 $test_buffer2] {
+        send_user "\n the disass main value matches\n" 
+} else {
+        set GRET [expr $GRET + 1]
+        send_user "\n the disass main value mismatch\n" 
+}
+
+exit $GRET
+
+interact

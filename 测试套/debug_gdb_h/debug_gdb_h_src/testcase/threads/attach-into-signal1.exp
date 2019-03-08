@@ -1,0 +1,227 @@
+#!/usr/bin/expect -f 
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This test was created by modifying attach-stopped.exp.
+# This file was created by Jan Kratochvil <jan.kratochvil@redhat.com>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/threads"
+gdb_test "cd /tmp/for_gdb_test/threads" "$target_prompt*"
+# This test only works on Linux
+#if { ![isnative] || [is_remote host] || [target_info exists use_gdb_stub]
+#     || ![istarget *-linux*] } {
+#    continue
+#}
+
+set testfile "attach-into-signal"
+set srcfile  ${testfile}.c
+set binfile  ${testfile}
+set escapedbinfile  $target_prompt/${testfile}
+
+#remote_exec build "rm -f ${binfile}"
+# For debugging this test
+#
+#log_user 1
+
+proc corefunc { threadtype } {
+    global srcfile
+    global binfile
+    global escapedbinfile
+    global srcdir
+    global subdir
+    global gdb_prompt
+    global GRET GDB_TOOL_DIR
+    global target_prompt
+#    if [get_compiler_info ${binfile}] {
+#	return -1
+#    }
+
+    # Start the program running and then wait for a bit, to be sure
+    # that it can be attached to.
+    # Statistically there is a better chance without giving process a nice.
+
+#    set testpid [eval exec $binfile &]
+#    exec sleep 2
+    gdb_test "handle SIGALRM stop print pass" "Yes.*Yes.*Yes.*"
+    set testpid 0
+    send "./$binfile & \n"
+    expect {
+        -timeout 2
+        -re "\\\[1\\\] (\[0-9\]+).*$target_prompt" {
+        set testpid $expect_out(1,string)
+        }
+        timeout {
+        }
+    }
+
+    if { $testpid == 0 } {
+        send "ps -ef | grep $binfile |grep -v \"grep $binfile\" \n"
+        expect {
+            -timeout 2
+            -re " (\[0-9\]+).*$target_prompt" {
+                set testpid $expect_out(1,string)
+            }
+            timeout {
+                send_user "fail \n"
+                set GRET [expr $GRET + 1]
+            }
+        }
+    }
+    # Avoid some race:
+    sleep 2
+
+    send_user "testpid = $testpid \n"
+
+    # Run 2 passes of the test.
+    # The C file inferior stops pending its signals if a single one is lost,
+    # we test successful redelivery of the caught signal by the 2nd pass.
+
+    # linux-2.6.20.4.x86_64 had maximal attempt # 20 in 4 test runs.
+    set attempts 100
+    set attempt 1
+    set passes 1
+    while { $passes < 3 && $attempt <= $attempts } {
+        set stoppedtry 0
+        while { $stoppedtry < 10 } {
+            send "cat /proc/$testpid/status | sed -n 2p \n"
+            expect {
+                -timeout 2
+                -re "\\(stopped\\).*$target_prompt" {
+                    send_user "pass "
+                }
+                -re "No such file or directory.*$target_prompt" {
+                    set stoppedtry 10
+                    break
+                }
+                timeout {
+                    break
+                }
+            }
+
+            sleep 1
+            set stoppedtry [expr $stoppedtry + 1]
+        }
+        if { $stoppedtry >= 10 } {
+            set test "$threadtype: process is still running on the attempt # $attempt of $attempts"
+            break
+        }
+
+        gdb_test "'$GDB_TOOL_DIR'gdb" "$gdb_prompt"
+        gdb_test_no_output "set debug lin-lwp 1" ""
+        set test "$threadtype: attach (pass $passes), pending signal catch"
+        send "attach $testpid \n"
+        expect {
+            -timeout 4
+            -re "Attaching to program.*$escapedbinfile, process $testpid.*Received Alarm clock.*$gdb_prompt" {
+                 set passes [expr $passes + 1]
+            }
+            -re "Attaching to program.*$escapedbinfile, process $testpid.*$gdb_prompt" {
+                 set attempt [expr $attempt + 1]
+            }
+            -re "Attaching to process $testpid.*Received Alarm clock.*$gdb_prompt" {
+                set passes [expr $passes + 1]
+            }
+            -re "Attaching to process $testpid.*$gdb_prompt" {
+                set attempt [expr $attempt - 1]
+            }
+            timeout {
+                break
+            }
+        }
+
+        gdb_test "detach" "Detaching from.*" ""
+        gdb_exit
+    }
+
+    if {$passes < 3} {
+        if {$attempt > $attempts} {
+            unresolved $test
+        } else {
+            send_user "fail $test"
+                set GRET [expr $GRET + 1]
+        }
+    }
+
+    # Exit and detach the process.
+       
+
+    # Make sure we don't leave a process around to confuse
+    # the next test run (and prevent the compile by keeping
+    # the text file busy), in case the "set should_exit" didn't
+    # work.
+
+    # Continue the program - some Linux kernels need it before -9 if the
+    # process is stopped.
+    gdb_test "kill -s CONT ${testpid}"  "$target_prompt"
+       
+    gdb_test  "kill -9 ${testpid}" "$target_prompt"
+}
+
+# Start with clean gdb
+#gdb_exit
+
+# build the test case first without threads
+#
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested "attach-into-signal.exp (unthreaded)"
+#    return -1
+#}
+
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+corefunc nonthreaded
+
+# build the test case also with threads
+#
+#if  { [gdb_compile_pthreads "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug additional_flags=-DUSE_THREADS}] != "" } {
+#    untested "attach-into-signal.exp (threaded)"
+#    return -1
+#}
+
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+#gdb_test_no_output "set debug lin-lwp 1" ""
+
+#corefunc threaded
+exit $GRET
+
+interact

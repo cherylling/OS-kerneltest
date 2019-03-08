@@ -1,0 +1,102 @@
+#!/usr/bin/expect -f 
+#   Copyright 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+# Test running a program from the GDB prompt and then detaching it.
+# NOTE: This test could be much more thorough.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if $tracelevel then {
+#	strace $tracelevel
+#}
+
+
+# Only GNU/Linux is known to support this.
+#if { ! [istarget "*-*-linux*"] } {
+#  return 0
+#}
+
+# Are we on a target board?
+#if [is_remote target] then {
+#    return 0
+#}
+
+set testfile "attach"
+set srcfile  ${testfile}.c
+set binfile  ${testfile}
+#set escapedbinfile  [string_to_regexp ${testfile}]
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#     untested detach.exp
+#     return -1
+#}
+
+proc do_detach_tests {} {
+  global srcdir
+  global binfile
+  global escapedbinfile
+  global subdir
+  global pass target_prompt
+
+  runto_main
+  gdb_test_no_output "set should_exit = 1" "set should_exit, $pass"
+  gdb_test "detach" "Detaching from program: $target_prompt/$binfile.*" "detach, $pass"
+  sleep 1
+}
+
+# Start with a fresh gdb
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+
+global pass
+set pass "one"
+do_detach_tests
+
+# Wait a moment and do it again.
+
+set pass "two"
+do_detach_tests
+
+exit $GRET
+
+interact

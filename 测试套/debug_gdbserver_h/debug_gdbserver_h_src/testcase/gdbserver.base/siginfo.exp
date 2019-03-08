@@ -1,0 +1,147 @@
+#!/usr/bin/expect -f
+# Copyright 2004, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+# The program siginfo.c creates a backtrace containing a signal
+# handler registered using sigaction's sa_sigaction / SA_SIGINFO.
+# Some OS's (e.g., GNU/Linux) use different signal trampolines for
+# sa_sigaction and sa_handler.
+
+# This test first confirms that GDB can backtrace through the
+# alternative sa_sigaction signal handler, and second that GDB can
+# nexti/stepi out of such a handler.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile siginfo
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test_no_output "set width 144"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+
+gdb_test "display/i \$pc"
+
+# Advance to main
+#if { ![runto_main] } then {
+#    gdb_suppress_tests;
+#}
+gdb_test "b main" ""
+gdb_test "c" ""
+
+# Pass all the alarms straight through (but verbosely)
+# gdb_test "handle SIGALRM print pass nostop"
+# gdb_test "handle SIGVTALRM print pass nostop"
+# gdb_test "handle SIGPROF print pass nostop"
+
+# Run to the signal handler, validate the backtrace.
+gdb_test "break handler"
+gdb_test "continue" ".* handler .*" "continue to stepi handler"
+gdb_test_sequence "bt" "backtrace for nexti" {
+    "\[\r\n\]+.0 \[^\r\n\]* handler "
+    "\[\r\n\]+.1  .signal handler called."
+    "\[\r\n\]+.2 \[^\r\n\]* main "
+}
+
+# Check that GDB can step the inferior back to main
+set test "step out of handler"
+send "step\n"
+expect {
+    -re "Could not insert single-step breakpoint.*$gdb_prompt" {
+#	setup_kfail gdb/1736 sparc*-*-openbsd*
+	fail "$test (could not insert single-step breakpoint)"
+    }
+    -re "done = 1;.*${gdb_prompt}" {
+	send "$i\n"
+	exp_continue
+    }
+    -re "\} .. handler .*${gdb_prompt}" {
+	send "step\n"
+	exp_continue
+    }
+    -re "$inferior_exited_re normally.*${gdb_prompt}" {
+	fail "gdb/1613 $test (program exited)"
+    }
+    -re "(while ..done|return 0).*${gdb_prompt}" {
+	# After stepping out of a function /r signal-handler, GDB will
+	# advance the inferior until it is at the first instruction of
+	# a code-line.  While typically things return to the middle of
+	# the "while..." (and hence GDB advances the inferior to the
+	# "return..." line) it is also possible for the return to land
+	# on the first instruction of "while...".  Accept both cases.
+	pass "$test"
+    }
+    timeout {
+        fail "timeout"
+    }
+}
+
+gdb_exit
+exit $GRET
+
+interact

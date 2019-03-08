@@ -1,0 +1,188 @@
+#!/usr/bin/expect -f
+# Copyright (C) 2011-2012 Free Software Foundation, Inc.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Manipulation with PID on target is not supported.
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_promptx "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_promptx" "$target_promptx"
+gdb_test "export LD_LIBRARY_PATH=$target_promptx" "$target_prompt"
+
+set testfile attach-pie-noexec
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#if [is_remote target] then {
+#    return 0
+#}
+
+#set executable ${testfile}
+#set binfile ${objdir}/${subdir}/${executable}
+
+#if { [prepare_for_testing ${testfile}.exp $executable "" [list debug "additional_flags=-fPIE -pie"]] } {
+#    return -1
+#}
+
+#clean_restart $executable
+
+
+set arch ""
+set test "show architecture"
+send "$test\n"
+expect {
+    -re "The target architecture is set automatically \\(currently (.*)\\).*$gdb_prompt" {
+	set arch $expect_out(1,string)
+	pass $test
+    }
+    timeout {
+        fail "timeout $test"
+    }
+}
+
+gdb_test "b main" ""
+gdb_test "c" ""
+#if ![runto_main] {
+#    return 0
+#}
+set test "sanity check info shared"
+gdb_test "info shared" "From\[ \t\]+To\[ \t\]+Syms Read\[ \t\]+Shared Object Library\r\n0x.*$gdb_prompt"
+
+gdb_exit
+
+#if {$arch == ""} {
+#    untested ${testfile}.exp
+#    return 0
+#}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_promptx "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_promptx" "$target_promptx"
+gdb_test "export LD_LIBRARY_PATH=$target_promptx" "$target_prompt"
+
+set testfile attach-pie-noexec
+set srcfile ${testfile}.c
+
+set testpid 0
+send "./$testfile & \n"
+expect {
+    -timeout 2
+        -re "\\\[1\\\] (\[0-9\]+).*$target_prompt" {
+            set testpid $expect_out(1,string)
+        }
+    timeout {
+    }
+}
+
+if { $testpid == 0 } {
+    send "ps | grep attach-pie- |grep -v \"grep attach-pie-\" \n"
+        expect {
+            -timeout 2
+                -re "(\[0-9\]+) pts.*$target_prompt" {
+                    set testpid $expect_out(1,string)
+                }
+            timeout {
+                send_user "fail \n"
+                    set GRET [expr $GRET + 1]
+            }
+        }
+}
+# Avoid some race:
+sleep 2
+
+send_user "testpid = $testpid \n"
+
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver --attach $host_ip:1111 $testpid &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." ": No such file or directory.*$gdb_prompt"
+
+#set testpid [eval exec $binfile &]
+#exec sleep 2
+
+#gdb_start
+#file delete -- $testfile
+#gdb_test "" "Attaching to process $testpid\r\n.*: No such file or directory\\." "attach"
+gdb_test "set architecture $arch" "The target architecture is assumed to be $arch"
+gdb_test "info shared" "From\[ \t\]+To\[ \t\]+Syms Read\[ \t\]+Shared Object Library\r\n0x.*"
+
+gdb_exit
+
+gdb_test "ssh root@$target_ip" "$target_prompt"
+gdb_test "kill -9 $testpid" "$target_prompt"
+exit $GRET
+
+interact

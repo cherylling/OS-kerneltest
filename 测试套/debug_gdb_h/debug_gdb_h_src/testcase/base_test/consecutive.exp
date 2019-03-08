@@ -1,0 +1,93 @@
+#!/usr/bin/expect -f
+
+#   Copyright 1998-1999, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip 
+global  target_prompt 
+global decimal 
+global hex
+
+spawn ssh root@$target_ip
+
+expect {
+    -timeout 2
+        -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+        }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+            set GRET [expr $GRET + 1]
+    }   
+}
+
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt*"
+gdb_test "'$GDB_TOOL_DIR'gdb consecutive" "$GDBPROMPT"
+gdb_test "b main" "$GDBPROMPT"
+gdb_test "r" "foo \\(\\);.*$GDBPROMPT"
+
+set nl "\[\r\n\]+"
+
+gdb_test "b foo" "$GDBPROMPT"
+gdb_test "continue" "Breakpoint $decimal, foo .*" \
+	"continue to breakpoint in foo"
+
+set bp_addr 0
+set stop_addr 0
+
+send "x /2i \$pc\n" 
+expect {
+    -timeout 2
+    -re "$hex.*${nl}   ($hex).*$GDBPROMPT" {
+	    set bp_addr $expect_out(1,string)
+	    send_user "\n get breakpoint address for foo PASS\n"
+    }
+    timeout {
+	    send_user "\n get breakpoint address for foo FAIL\n"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+gdb_test "break \*$bp_addr" "Breakpoint $decimal at $bp_addr: file .*" \
+	"set bp, 2nd instr"
+
+send "step\n" 
+expect {
+    -timeout 2 
+    -re "Breakpoint $decimal, ($hex) in foo.*$GDBPROMPT" {
+    	set stop_addr $expect_out(1,string)
+	if [eval expr "$bp_addr == $stop_addr"] then {
+	    send_user "\nstopped at bp, 2nd instr PASS \n"
+        send_user "\n$bp_addr == $stop_addr\n" 
+	} else {
+        send_user "\n stopped at bp, 2nd instr (wrong address) FAIL \n"
+        set GRET [expr $GRET + 1]
+	}
+    }
+    timeout {
+        send_user "\n stopped at bp, 2nd instr (wrong address) FAIL \n"
+        set GRET [expr $GRET + 1]
+    }
+}
+
+exit $GRET
+
+interact

@@ -1,0 +1,5 @@
+
+-n -C 2
+--null --cpu 2
+-d -S -A -a -x xxx
+--detailed --sync --no-aggr --all-cpus --field-separator xxx

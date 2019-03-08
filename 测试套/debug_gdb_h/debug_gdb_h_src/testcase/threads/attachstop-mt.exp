@@ -1,0 +1,429 @@
+#!/usr/bin/expect -f 
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This test is based on gdb.base/attach.exp with modifications by Jeff Johnston
+# <jjohnstn@redhat.com> and Jan Kratochvil <jan.kratochvil@redhat.com>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/threads"
+gdb_test "cd /tmp/for_gdb_test/threads" "$target_prompt"
+# This test only works on Linux
+#if { ![isnative] || [is_remote host] || [target_info exists use_gdb_stub]
+#     || ![istarget *-linux*] } {
+#    continue
+#}
+
+set testfile "attachstop-mt"
+set srcfile  ${testfile}.c
+set binfile  ${testfile}
+set escapedbinfile  [string_to_regexp ${testfile}]
+
+#execute_anywhere "rm -f ${binfile}"
+#remote_exec build "rm -f ${binfile}"
+# For debugging this test
+#
+#log_user 1
+
+# build the test case
+#
+#if  { [gdb_compile_pthreads "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested attachstop-mt.exp
+#    return -1
+#}
+
+#if [get_compiler_info ${binfile}] {
+#    return -1
+#}
+
+# Start the program running and then wait for a bit, to be sure
+# that it can be attached to.
+
+#set testpid [eval exec ./$binfile &]
+set testpid 0
+send "./$binfile & \n"
+expect {
+    -timeout 2
+        -re "\\\[1\\\] (\[0-9\]+).*/tmp/for_gdb_test/threads" {
+            set testpid $expect_out(1,string)
+        }
+    timeout {
+    }
+}
+if { $testpid == 0 } {
+    send "ps -ef | grep $binfile |grep -v \"grep $binfile\" \n"
+        expect {
+            -timeout 2
+                -re " (\[0-9\]+).*/tmp/for_gdb_test/threads" {
+                    set testpid $expect_out(1,string)
+                }
+            timeout {
+                send_user "fail \n"
+                    set GRET [expr $GRET + 1]
+            }
+        }
+}
+# Avoid some race:
+
+
+# No race
+sleep 2
+send_user "testpid = $testpid \n"
+
+
+# The testcase has three threads, find some other thread TID for $testpid2.
+
+#set tids [exec sh -c "echo /proc/$testpid/task/*"]
+#regsub -all /proc/$testpid/task/ $tids {} tids
+#if {$tids == "*"} {
+#    send_user "/proc/PID/task is not supported (kernel-2.4?)"
+#    gdb_test "kill -9 ${testpid}" "$target_prompt"
+#    exit -1
+#}
+#set tids [lsort -integer [split $tids]]
+#if {[llength $tids] != 3 || [lindex $tids 0] != $testpid} {
+#    send_user "Invalid TIDs <$tids> for PID $testpid"
+#    send_user "fail Invalid TIDs found"
+#    gdb_test "kill -9 ${testpid}" "$target_prompt"
+#    exit -1
+#}
+
+set testpid2 $testpid
+set testpid3 $testpid
+incr testpid2 1
+incr testpid3 2
+send "echo /proc/$testpid/task/* \n"
+expect {
+    -timeout 2
+        -re "/proc/$testpid/task/$testpid /proc/$testpid/task/(\[0-9\]+) /proc/$testpid/task/(\[0-9\]+).*/tmp/for_gdb_test/threads" {
+            set testpid2 $expect_out(1,string)            
+            set testpid3 $expect_out(2,string)            
+        }
+    timeout {
+        send_user "fail Invalid  \n"
+        set GRET [expr $GRET + 1]
+        gdb_test "kill -9 ${testpid}" "/tmp/for_gdb_test/threads"
+        exit -1
+    }
+}
+
+#set testpid2 [lindex $tids 2]
+
+
+send "cat /proc/$testpid/task/$testpid2/status | sed -n 2p \n"
+expect {
+    -timeout 2
+        -re "\\(sleeping\\).*/tmp/for_gdb_test/threads" {
+            send_user "pass "
+        }
+    timeout {
+        send_user "fail get /proc/$testpid/task/$$testpid2/status"
+            set GRET [expr $GRET + 1]
+    }
+}
+# Initial sanity test it is normally sleeping
+#set status2 /proc/${testpid}/task/${testpid2}/status
+#set fileid0 [open $status2 r];
+#gets $fileid0 line1;
+#gets $fileid0 line2;
+#close $fileid0;
+
+#set test "attach0, initial sanity check of the sleeping state"
+#if {[string match "*(sleeping)*" $line2]} {
+#  pass $test
+#} else {
+#  send_user "fail $test"
+#  set GRET [expr $GRET + 1]
+#}
+
+#-------------------------------------------------------------------------
+# Sttach and detach to test it will not become stopped
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+gdb_test "'$GDB_TOOL_DIR'gdb " "$GDBPROMPT"
+
+set test "attach0 to sleeping"
+send "attach $testpid\n" 
+expect {
+    -timeout 2
+    -re "Attaching to process $testpid.*attachstop-mt...done.*$GDBPROMPT" {
+#        pass "$test"
+    }
+    timeout {
+        send_user "\n*****error: attach $testpid *****\n"
+        set GRET [expr $GRET + 1]
+        }
+}
+
+gdb_test "gcore /dev/null" ".*aved corefile.*" "attach0 to sleeping gcore invocation"
+
+gdb_test "thread 2" ".*witching to thread 2 .*" "attach0 to sleeping switch thread"
+
+gdb_test "bt" ".*sleep.*func.*" "attach0 to sleeping bt"
+
+# Exit and detach the process.
+
+gdb_exit
+
+# No race
+sleep 2
+
+send "cat /proc/$testpid/task/$testpid2/status | sed -n 2p \n"
+expect {
+    -timeout 2
+        -re "\\(sleeping\\).*/tmp/for_gdb_test/threads" {
+            send_user "pass "
+        }
+    timeout {
+        send_user "fail get /proc/$testpid/task/$$testpid2/status"
+            set GRET [expr $GRET + 1]
+    }
+}
+# Check it did not get stopped by our gdb
+#set fileid1 [open $status2 r];
+#gets $fileid1 line1;
+#gets $fileid1 line2;
+#close $fileid1;
+
+#set test "attach1, post-gdb sanity check of the sleeping state - Red Hat BZ 197584"
+#if {[string match "*(sleeping)*" $line2]} {
+#  pass $test
+#} else {
+#  send_user "fail $test"
+#  set GRET [expr $GRET + 1]
+#}
+
+# Stop the program 
+gdb_test "kill -s STOP ${testpid}" "/tmp/for_gdb_test/threads"
+
+# No race
+sleep 2
+
+# Check it really got stopped by kill(1)
+#set fileid2 [open $status2 r];
+#gets $fileid2 line1;
+#gets $fileid2 line2;
+#close $fileid2;
+
+#set test "attach2, initial sanity check of the stopped state"
+#if {[string match "*(stopped)*" $line2]} {
+#  pass $test
+#} else {
+#  send_user "fail $test"
+#  set GRET [expr $GRET + 1]
+#}
+
+send "cat /proc/$testpid/task/$testpid2/status | sed -n 2p \n"
+expect {
+    -timeout 2
+        -re "\\(stopped\\).*/tmp/for_gdb_test/threads" {
+            send_user "pass "
+        }
+    timeout {
+        send_user "fail get /proc/$testpid/task/$$testpid2/status"
+            set GRET [expr $GRET + 1]
+    }
+}
+
+# Start with clean gdb
+#gdb_start
+#gdb_load ${binfile}
+
+gdb_test "'$GDB_TOOL_DIR'gdb " "$GDBPROMPT"
+# Verify that we can attach to the process by first giving its
+# executable name via the file command, and using attach with the
+# process ID.
+
+set test "set file, before attach3 to stopped process"
+send "file $binfile\n" 
+expect {
+   -timeout 2
+   -re "Load new symbol table from.*y or n. $" {
+        gdb_test "y" "Reading symbols from $target_prompt/$binfile\.\.\.*done." \
+		"$test (re-read)"
+    }
+    -re "Reading symbols from $target_prompt/$binfile\.\.\.*done.*$GDBPROMPT" {
+#        pass "$test"
+    }
+    timeout {
+        send_user "\n*****error: file $binfile *****\n"
+        set GRET [expr $GRET + 1]
+        }
+}
+
+set test "attach3 to stopped, after setting file"
+send "attach $testpid\n"
+expect {
+    -timeout 2
+    -re "Attaching to program: $target_prompt/attachstop-mt, process $testpid.*$GDBPROMPT" {
+#        pass "$test"
+    }
+    timeout {
+        send_user "\n*****error: attach3 $testpid *****\n"
+        set GRET [expr $GRET + 1]
+        }
+}
+
+# We may be already after the threads phase.
+# `thread 2' command is important for the test to switch the current thread to
+# a non-primary one for the detach process.
+
+gdb_test "thread 2" ".*(witching to thread 2 |hread ID 2 not known).*" "attach3 to stopped switch thread"
+gdb_test "bt" ".*sleep.*(func|main).*" "attach3 to stopped bt"
+
+# Exit and detach the process.
+gdb_exit
+
+# Stop the program 
+gdb_test "kill -s STOP ${testpid}" "$target_prompt"
+
+# No race
+sleep 2
+
+# Continue the test as we would hit another expected bug regarding
+# 	Program received signal SIGSTOP, Stopped (signal).
+# across NPTL threads.
+
+#gdb_start
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdb " "$GDBPROMPT"
+
+# Verify that we can attach to the process just by giving the
+# process ID.
+   
+set test "attach4 to stopped, after setting file"
+send "attach $testpid\n"
+expect {
+    -timeout 2
+    -re "Attaching to process $testpid.*attachstop-mt...done.*$GDBPROMPT" {
+#        pass "$test"
+    }
+    timeout {
+        send_user "\n*****error: attach4 $testpid *****\n"
+        set GRET [expr $GRET + 1]
+        }
+}
+
+# We may be already after the threads phase.
+# `thread 2' command is important for the test to switch the current thread to
+# a non-primary one for the detach process.
+
+gdb_test "thread 2" ".*(witching to thread 2 |hread ID 2 not known).*" "attach4 to stopped switch thread"
+gdb_test "bt" ".*sleep.*(func|main).*" "attach4 to stopped bt"
+
+# RHEL3U8 kernel-2.4.21-47.EL will not return SIGINT but only shorten the sleep.
+#gdb_breakpoint $srcfile:[gdb_get_line_number "Ridiculous time"]
+#gdb_breakpoint $srcfile:[gdb_get_line_number "cut the sleep time"]
+gdb_test "b 30" "$gdb_prompt"
+gdb_test "b 31" "$gdb_prompt"
+set test "attach4 continue"
+send "continue\n"
+expect {
+    -timeout 2
+    -re "Continuing" {
+#	pass "continue ($test)"
+    }
+    timeout {
+        send_user "\n*****error: attach4 continue *****\n"
+        set GRET [expr $GRET + 1]
+        }
+}
+
+# For this to work we must be sure to consume the "Continuing."
+# message first, or GDB's signal handler may not be in place.
+after 1000 {send "\003"}
+set test "attach4 stop by interrupt"
+expect {
+  -re "Program received signal SIGINT.*$gdb_prompt"
+    {
+#      pass $test
+    }
+  -re "Breakpoint \[0-9\].*$srcfile.*$gdb_prompt"
+    {
+#      pass $test
+    }
+  timeout
+    {
+     send_user "fail $test (timeout)"
+      set GRET [expr $GRET + 1]
+    }
+}
+
+gdb_exit
+
+# No race
+sleep 2
+
+# At this point, the process should be sleeping
+
+send "cat /proc/$testpid/task/$testpid2/status | sed -n 2p \n"
+expect {
+    -timeout 2
+        -re "\\(sleeping\\).*/tmp/for_gdb_test/threads" {
+            send_user "pass "
+        }
+    timeout {
+        send_user "fail get /proc/$testpid/task/$testpid2/status"
+            set GRET [expr $GRET + 1]
+    }
+}
+#set fileid4 [open $status2 r];
+#gets $fileid4 line1;
+#gets $fileid4 line2;
+#close $fileid4;
+
+#set test "attach4, exit leaves process sleeping"
+#if {[string match "*(sleeping)*" $line2]} {
+#  pass $test
+#} else {
+#  fail $test
+#}
+
+# Make sure we don't leave a process around to confuse
+# the next test run (and prevent the compile by keeping
+# the text file busy), in case the "set should_exit" didn't
+# work.
+   
+#remote_exec build "kill -9 ${testpid}"
+gdb_test "kill -9 ${testpid}" "$target_prompt"
+
+exit $GRET
+
+interact

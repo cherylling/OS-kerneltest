@@ -1,0 +1,164 @@
+#!/usr/bin/expect -f
+# Copyright 2008-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#
+# Test support for stepping over longjmp.
+#
+
+#if $tracelevel then {
+#    strace $tracelevel
+#}
+
+
+#set testfile "longjmp"
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug nowarnings}] != "" } {
+#     untested longjmp.exp
+#     return -1
+#}
+
+#if [get_compiler_info ${binfile}] {
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+#if ![runto_main] then {
+#   fail "Can't run to main"
+#   return 0
+#}
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip 
+global  target_prompt 
+set srcfile longjmp.c
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+            -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+                    }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+               set GRET [expr $GRET + 1]
+                                        }   
+       }
+cmd_retkey "cd $target_dir" "$target_prompt*"
+cmd_retkey "'$GDB_TOOL_DIR'gdb longjmp" "$GDBPROMPT"
+
+cmd_retkey "b main" "$GDBPROMPT"
+cmd_retkey "r" "volatile int i = 0;.*$GDBPROMPT"
+
+set bp_miss_step_1 60
+set bp_miss_step_2 73
+
+set bp_start_test_1 50
+set bp_start_test_2 64
+set bp_start_test_3 76
+
+#
+# Pattern 1 - simple longjmp.
+#
+
+delete_breakpoints
+
+cmd_retkey "break $bp_start_test_1" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_start_test_1.*" \
+    "breakpoint at pattern 1 start"
+cmd_retkey "continue" "patt1.*" "continue to breakpoint at pattern 1 start"
+
+# set safe-net break
+cmd_retkey "break $bp_miss_step_1" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_miss_step_1.*" \
+    "breakpoint at miss_step_1"
+
+cmd_retkey "next" "longjmps\\+\\+;.*" "next over setjmp (1)"
+cmd_retkey "next" "longjmp \\(env, 1\\);.*" "next to longjmp (1)"
+
+set msg "next over longjmp(1)"
+send "next\n"  
+    expect {
+    -re ".*patt1.*$GDBPROMPT" {
+	send_user "pass $msg"
+	cmd_retkey "next" "resumes\\+\\+.*" "next into else block (1)"
+	cmd_retkey "next" "miss_step_1.*" "next into safety net (1)"
+    }
+    -re "miss_step_1.*$GDBPROMPT" {
+	send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+    }
+}
+
+#
+# Pattern 2 - longjmp from an inner function.
+#
+
+delete_breakpoints
+
+cmd_retkey "break $bp_start_test_2" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_start_test_2.*" \
+    "breakpoint at pattern 2 start"
+cmd_retkey "continue" "patt2.*" "continue to breakpoint at pattern 2 start"
+
+# set safe-net break
+cmd_retkey "break $bp_miss_step_2" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_miss_step_2.*" \
+    "breakpoint at miss_step_2"
+
+cmd_retkey "next" "call_longjmp.*" "next over setjmp (2)"
+
+set msg "next over call_longjmp (2)"
+send "next\n" 
+    expect {
+    -re ".*patt2.*$GDBPROMPT" {
+	send_user "pass $msg"
+
+	cmd_retkey "next" "resumes\\+\\+.*" "next into else block (2)"
+	cmd_retkey "next" "miss_step_2.*" "next into safety net (2)"
+    }
+    -re "miss_step_2.*$GDBPROMPT" {
+	send_user "fail $msg"
+    set GRET [expr $GRET + 1]
+    }
+}
+
+#
+# Pattern 3 - setjmp/longjmp inside stepped-over function.
+#
+
+delete_breakpoints
+
+cmd_retkey "break $bp_start_test_3" \
+    "Breakpoint.*at.* file .*$srcfile, line.*$bp_start_test_3.*" \
+    "breakpoint at pattern 3 start"
+cmd_retkey "continue" "patt3.*" "continue to breakpoint at pattern 3 start"
+
+cmd_retkey "next" "longjmp caught.*" "next over patt3"
+
+exit $GRET
+
+interact

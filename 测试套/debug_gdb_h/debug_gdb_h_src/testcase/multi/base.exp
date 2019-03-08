@@ -1,0 +1,225 @@
+#!/usr/bin/expect -f 
+# Copyright 2009-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test multi-exec / multi-process features that work for all configurations,
+# even ones that cannot run multiple processes simultaneously.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdb_test/multi" "$target_prompt*"
+
+set testfile "base"
+
+set exec1 "hello"
+set srcfile1 ${exec1}.c
+
+set exec2 "hangout"
+set srcfile2 ${exec2}.c
+set binfile2 ${exec2}
+
+set exec3 "goodbye"
+set srcfile3 ${exec3}.c
+set binfile3 ${exec3}
+
+#clean_restart ${exec1}
+gdb_test "'$GDB_TOOL_DIR'gdb $exec1" "$GDBPROMPT"
+
+
+# Add an empty inferior space, switch to it, and load a main
+# executable into it.
+gdb_test "add-inferior" "Added inferior 2.*" "add empty inferior 2"
+gdb_test "inferior 2" "Switching to inferior 2.*" "switch to inferior 2"
+gdb_test "file ${binfile2}" ".*" "load ${exec2} file in inferior 2"
+
+# Add a new inferior space and load a main executable into it in one
+# command.
+gdb_test "add-inferior -exec ${binfile3}" \
+    "Added inferior 3.*" \
+    "add inferior 3 with -exec ${exec3}"
+
+# Check that we have multiple spaces.
+
+gdb_test "info inferiors" \
+    "Executable.*${exec3}.*${exec2}.*${exec1}.*"
+
+# Test info inferiors with args
+
+set see1 0
+set see2 0
+set see3 0
+
+#send "info inferior 2 3\n" 
+#expect {
+#    -re "3.*$exec3" {
+#      set see3 1
+#        send_user "........3..info inferior 2 3...\n"
+#      exp_continue
+#    }
+#    -re "2.*$exec2" {
+#      set see2 1
+#        send_user "........2..info inferior 2 3...\n"
+#      exp_continue
+#    }
+#    -re "1.*$exec1" {
+#      set see1 1
+#        send_user "........1..info inferior 2 3...\n"
+#      exp_continue
+#    }
+#    -re "$GDBPROMPT" {
+#      if { !$see1 && $see2 && $see3 } then {
+##         pass "info inferior 2 3"
+#      } else {
+#          send_user "info inferior 2 3 FAIL"
+#        set GRET [expr $GRET + 1]
+#      }
+#    }
+#}
+gdb_test "info inferior 2 3" \
+         "Executable.*3.*$exec3.*2.*$exec2.*$GDBPROMPT"
+
+
+#set see1 0
+#set see2 0
+#set see3 0
+#
+#send "info inferior 1-2\n" 
+#expect {
+#    -re "2.*$exec2" {
+#      set see3 1
+#      exp_continue
+#    }
+#    -re "2.*$exec2.*" {
+#      set see2 1
+#      exp_continue
+#    }
+#    -re "1.*$exec1.*" {
+#      set see1 1
+#      exp_continue
+#    }
+#    -re "$GDBPROMPT" {
+#      if { $see1 && $see2 && !$see3 } then {
+##         pass "info inferior 1-2"
+#      } else {
+#          send_user "info inferior 1-2 FAIL....$see1 $see2 $see3 "
+#        set GRET [expr $GRET + 1]
+#      }
+#    }
+#}
+
+gdb_test "info inferior 1-2" \
+         "Executable.*2.*$exec2.*1.*$exec1.*$GDBPROMPT"
+# Test that we have multiple symbol tables.
+
+gdb_test "inferior 1" ".*" "switch to inferior 1"
+gdb_test "info functions commonfun" \
+    "${srcfile1}.*" \
+    "'info functions commonfun' in inferior 1"
+
+gdb_test "inferior 3" ".*" "switch to inferior 3"
+gdb_test "info functions commonfun" \
+    "${srcfile3}.*" \
+    "'info functions commonfun' in inferior 3"
+
+gdb_test "inferior 1" ".*" "switch back to inferior 1"
+
+gdb_test_no_output "set listsize 1"
+
+gdb_test "list commonfun" "from hello.*" "list commonfun in hello"
+
+gdb_test "print hglob" "1"
+
+gdb_test "print glob" "92" "print glob (${exec1})"
+
+
+gdb_test "inferior 3" ".*" "switch to inferior 3 to print globals"
+
+gdb_test "print gglob" "2"
+
+gdb_test "print glob" "45" "print glob (${exec3})"
+
+gdb_test "list commonfun" "from goodbye.*" "list commonfun in goodbye"
+
+
+# Let's run the hello program.
+gdb_test "inferior 1" ".*" "switch to inferior 1 to run it"
+
+if { ![runto_main] } then {
+    return -1
+}
+
+gdb_test "break hello" ".*"
+gdb_test "continue" "Breakpoint \[0-9\].*, hello.*"
+
+# Now let's remove the other two
+
+gdb_test_no_output "remove-inferiors 2-3" "remove-inferiors 2-3"
+
+set see1 0
+set see2 0
+set see3 0
+
+#send "info inferiors\n"
+#sleep 3
+#expect {
+#    -re ". 3 \[^\r\n\]*${exec3}" {
+#	set see3 1
+#	exp_continue
+#    }
+#    -re ". 2 \[^\r\n\]*${exec2}" {
+#	set see2 1
+#	exp_continue
+#    }
+#    -re ". 1 \[^\r\n\]*${exec1}" {
+#	set see1 1
+#	exp_continue
+#    }
+#    -re "$GDBPROMPT" {
+#	if { $see1 && !$see2 && !$see3 } then {
+##	    pass "check remove-inferiors"
+#	} else {
+#	    send_user "check remove-inferiors FAIL"
+#        set GRET [expr $GRET + 1]
+#	}
+#    }
+#}
+
+gdb_test "info inferior" \
+         "Executable.*1.*${exec1}.*${GDBPROMPT}"
+
+exit $GRET
+
+interact

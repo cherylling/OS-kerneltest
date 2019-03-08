@@ -1,0 +1,55 @@
+
+Object file /home/new_disk/RATF_R2/git_svn_test_suite/baseos/BASEOS/debug_gdbserver_h/debug_gdbserver_h_src/testcase/gdbserver.base/break:
+
+[ 0] T 0x8424 _init section .init  crtstuff.c
+[ 1] S 0x8444 abort section .plt  
+[ 2] S 0x8450 __libc_start_main section .plt  
+[ 3] S 0x8468 printf section .plt  
+[ 4] S 0x8474 atoi section .plt  
+[ 5] S 0x8480 fwrite section .plt  
+[ 6] S 0x848c malloc section .plt  
+[ 7] T 0x8498 _start section .text  crtstuff.c
+[ 8] t 0x84d4 call_gmon_start section .text  
+[ 9] t 0x84f8 deregister_tm_clones section .text  crtstuff.c
+[10] t 0x8530 register_tm_clones section .text  crtstuff.c
+[11] t 0x8570 __do_global_dtors_aux section .text  crtstuff.c
+[12] t 0x8598 frame_dummy section .text  crtstuff.c
+[13] T 0x85cc need_malloc section .text  crtstuff.c
+[14] T 0x85e8 main section .text  crtstuff.c
+[15] T 0x86c4 factorial section .text  crtstuff.c
+[16] T 0x8710 multi_line_if_conditional section .text  crtstuff.c
+[17] T 0x8768 multi_line_while_conditional section .text  crtstuff.c
+[18] T 0x87e0 marker1 section .text  crtstuff.c
+[19] T 0x87fc marker2 section .text  crtstuff.c
+[20] T 0x8820 marker3 section .text  crtstuff.c
+[21] T 0x8840 marker4 section .text  crtstuff.c
+[22] T 0x886c __libc_csu_init section .text  crtstuff.c
+[23] T 0x88d0 __libc_csu_fini section .text  crtstuff.c
+[24] T 0x88d4 _fini section .fini  crtstuff.c
+[25] D 0x88dc _IO_stdin_used section .rodata  crtstuff.c
+[26] d 0x89c8 __FRAME_END__ section .eh_frame  crtstuff.c
+[27] d 0x109cc __frame_dummy_init_array_entry section .init_array  crtstuff.c
+[28] d 0x109cc __init_array_start section .init_array  crtstuff.c
+[29] d 0x109d0 __do_global_dtors_aux_fini_array_entry section .fini_array  crtstuff.c
+[30] d 0x109d0 __init_array_end section .init_array  crtstuff.c
+[31] d 0x109d4 __JCR_END__ section .jcr  crtstuff.c
+[32] d 0x109d4 __JCR_LIST__ section .jcr  crtstuff.c
+[33] d 0x109d8 _DYNAMIC section .dynamic  crtstuff.c
+[34] d 0x10ac8 _GLOBAL_OFFSET_TABLE_ section .got  crtstuff.c
+[35] D 0x10af4 __data_start section .data  crtstuff.c
+[36] D 0x10af4 data_start section .data  crtstuff.c
+[37] D 0x10af8 __dso_handle section .data  crtstuff.c
+[38] D 0x10afc __TMC_END__ section .data  crtstuff.c
+[39] A 0x10afc __bss_start  crtstuff.c
+[40] A 0x10afc __bss_start__  crtstuff.c
+[41] A 0x10afc _edata  crtstuff.c
+[42] B 0x10b00 stderr@@GLIBC_2.4 section .bss  crtstuff.c
+[43] b 0x10b04 completed.8554 section .bss  crtstuff.c
+[44] B 0x10b08 values section .bss  crtstuff.c
+[45] A 0x10d60 __bss_end__  crtstuff.c
+[46] A 0x10d60 __end__  crtstuff.c
+[47] A 0x10d60 _bss_end__  crtstuff.c
+[48] A 0x10d60 _end  crtstuff.c
+
+
+

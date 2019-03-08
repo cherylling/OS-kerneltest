@@ -1,0 +1,219 @@
+#!/usr/bin/expect -f
+#   Copyright 1997-2001, 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# display.exp   Test display commands
+#               Also do some printing stuff for coverage's sake.
+#
+
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global target_ip 
+global  target_prompt 
+
+spawn ssh root@$target_ip
+
+expect {
+    -timeout 2
+        -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+        }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+            set GRET [expr $GRET + 1]
+    }   
+}
+
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt*"
+gdb_test "'$GDB_TOOL_DIR'gdb display" "$GDBPROMPT"
+gdb_test "b main" "$GDBPROMPT"
+gdb_test "r" "do_loops\\(\\);.*$GDBPROMPT"
+
+# use this to debug:
+#if !$use_gdb_stub {
+#    gdb_test "kill" ".*The program is not being run.*"
+#    gdb_test "detach" ".*"
+#    gdb_test "run" ".*"
+#
+#    gdb_load ${binfile}
+#    gdb_test "kill" ".*" "kill again"
+#    gdb_test "detach" ".*" "detach again"
+#
+#   gdb_exit
+#    gdb_start
+#    gdb_reinitialize_dir $srcdir/$subdir
+#    gdb_load ${binfile}
+#}
+
+# Ok, on to real life
+#
+
+# Disable hardware watchpoints if necessary.
+#if [target_info exists gdb,no_hardware_watchpoints] {
+    gdb_test "set can-use-hw-watchpoints 0" "$GDBPROMPT"
+#}
+
+#set bp_location1 [gdb_get_line_number "set breakpoint 1 here"]
+gdb_test "break 19" ".*Breakpoint 2.*"           "break  do_loops"
+gdb_test "cont"     ".*Breakpoint 2, do_loops.*" "get to do_loops"
+
+# Create stopping points.
+#
+gdb_test "watch sum"    ".*\[Ww\]atchpoint 3: sum.*" "set watch"
+#set bp_location2 [gdb_get_line_number "set breakpoint 2 here"]
+gdb_test "break 26"     ".*Breakpoint 4.*" "break loop end"
+
+# Create displays for those points
+#
+gdb_test "info disp" ".*There are no auto-display expressions now..*" "inf disp"
+gdb_test "disp i" ".*1: i = 0.*" "display i"
+gdb_test "disp/x j" ".*2: /x j = 0x0.*" "display j"
+gdb_test "disp/i &k" ".*3: x/i &k(\r\n|  )   $hex:.*" "display &k"
+gdb_test "disp/f f" ".*4: /f f = 3.1415*" "display/f f"
+gdb_test "disp/s &sum" ".*5: x/s &sum  $hex.*sum.:.*" "display/s &sum"
+
+# Hit the displays
+#
+gdb_test "cont" ".*\[Ww\]atchpoint 3: sum.*\[1-9\]*: x/s &sum.*\[1-9\]*: /f f = 3.1415\r\n\[1-9\]*: x/i &k.*\r\n\[1-9\]*: /x j = 0x0\r\n\[1-9\]*: i = 0.*" "first disp"
+gdb_test "cont" ".*\[Ww\]atchpoint 3: sum.*\[1-9\]*: x/s &sum.*\[1-9\]*: /f f = 4.1415\r\n\[1-9\]*: x/i &k.*\r\n\[1-9\]*: /x j = 0x0.*\[1-9\]*: i = 0.*" "second disp"
+
+gdb_test "enab  disp 6" ".*No display number 6..*" "catch err"
+gdb_test "disab disp 1" "$GDBPROMPT" "disab disp 1"
+gdb_test "disab disp 2" "$GDBPROMPT" "disab disp 2"
+gdb_test "enab disp 1" "$GDBPROMPT" "re-enab"
+gdb_test "enab disp 1" "$GDBPROMPT" "re-enab of enab"
+gdb_test "undisp 5"  "$GDBPROMPT"   "undisp"
+gdb_test "info disp"    ".*Auto-display expressions now in effect.*y  /f f.*y  /1bi &k.*n  /x j.*y  i.*" "info disp"
+
+gdb_test "cont" ".*\[Ww\]atch.*5.1415.*.*i = 0.*" "next hit"
+
+gdb_test "undisp" \
+    "y or n" \
+    "undisp all" \
+    ".*Delete all auto-display expressions.*y or n. $" 
+gdb_test "y" "$GDBPROMPT"
+
+
+# Test displaying a variable that is temporarily at a bad address.
+# But if we can examine what's at memory address 0, then we'll also be
+# able to display it without error.  Don't run the test in that case.
+set can_read_0 0
+send "x 0\n" 
+expect {
+    -timeout 2
+    -re "0x0:.*Cannot access memory at address 0x0.*$GDBPROMPT" { }
+    -re "0x0:.*Error accessing memory address 0x0.*$GDBPROMPT" { }
+    -re ".*$GDBPROMPT" {
+	set can_read_0 1
+    }
+}
+
+if { !$can_read_0 } {
+    gdb_test "disp *p_i" ".*: \\*p_i = 0"
+    gdb_test "p p_i = 0x0" " = \\(int \\*\\) 0x0"
+#    gdb_test "display" ".*: \\*p_i = <error: .*>" "display bad address"
+    gdb_test "display" "Cannot access memory at address 0x0.*$GDBPROMPT" "display bad address"
+    gdb_test "p p_i = &i" " = \\(int \\*\\) $hex"
+#    gdb_test "display" ".*: \\*p_i = 0" "display good address"
+    gdb_test "display" "$GDBPROMPT" ".*: \\*p_i = 0" "display good address"
+
+    gdb_test "undisp" \
+	"y or n" \
+	"undisp all again" \
+	".*Delete all auto-display expressions.*y or n. $" 
+    gdb_test "y" "$GDBPROMPT"
+}
+
+gdb_test "disab 3" ".*.*" "disab 3"
+gdb_test "cont" ".*Breakpoint 4.*" "watch off"
+
+# Now the printf tests
+#
+# The "finish" command may leave us mid-line in the caller on some
+# targets, including but not limited to the m68k, i386 & PA.  So we
+# have to arrange to step until we hit the line with the call to
+# "do_vars".
+send "finish\n" 
+expect {
+    -timeout 2
+    -re ".*do_loops\\(\\);.*$GDBPROMPT" {
+	send_gdb "step\n"
+	exp_continue
+    }
+    -re ".*do_vars.*$GDBPROMPT" {
+    }
+    timeout {
+    send_user "\nfinish FAIL \n" 
+    set GRET [expr $GRET + 1]
+    }
+}
+
+gdb_test "step"      ".*do_vars.*.*i = 9.*"
+#set bp_location3 [gdb_get_line_number "set breakpoint 3 here"]
+gdb_test "break 42" ".*reakpoint 5.*" "tbreak in do_vars"
+gdb_test "cont"      ".*do_vars.*42.*42.*"
+
+# Beat on printf a bit
+#
+gdb_test "printf" ".*Argument required.*"
+gdb_test "printf %d" ".*Bad format string, missing.*"
+gdb_test "printf \"%d" ".*Bad format string, non-terminated.*"
+gdb_test "printf \"%d%d\",i" ".*Wrong number of arguments.*"
+gdb_test "printf \"\\\\!\\a\\f\\r\\t\\v\\b\\n\"" ".*!.*"
+gdb_test "printf \"\"" "$GDBPROMPT" "re-set term"
+gdb_test "printf \"\\w\"" ".*Unrecognized escape character.*"
+gdb_test "printf \"%d\" j" ".*Invalid argument syntax.*"
+gdb_test "printf \"%p\\n\", 0" "\\(nil\\)"
+gdb_test "printf \"%p\\n\", 1" "0x1"
+
+# play with "print", too
+#
+gdb_test "print/k j" ".*Undefined output format.*"
+gdb_test "print/d j" " = 0\[\\r\\n\]+"   "debug test output 1"
+gdb_test "print/r j" " = 0\[\\r\\n\]+"   "debug test output 1a"
+gdb_test "print/x j" " = 0x0\[\\r\\n\]+" "debug test output 2"
+gdb_test "print/r j" " = 0x0\[\\r\\n\]+" "debug test output 2a"
+gdb_test "print j"   " = 0\[\\r\\n\]+"   "debug test output 3"
+
+#if [istarget "hppa2.0w-hp-hpux11*"] {
+#    xfail "'x/0 j' terminates PA64 process - skipped test point"
+#} else {
+    gdb_test "x/0 j" "$GDBPROMPT"
+#}
+#if [istarget "hppa*-hp-hpux*"] {
+    # on HP-UX you could access the first page without getting an error
+#    gdb_test "x/rx j" ".*(Cannot access|Error accessing) memory.*|.*0xa:\[ \t\]*\[0-9\]+.*"
+#}
+gdb_test "print/0 j" ".*Item count other than 1 is meaningless.*" "print/0 j"
+gdb_test "print/s sum" " = 1000" "ignored s"
+gdb_test "print/i sum" ".*Format letter.*is meaningless.*.*" "no i"
+gdb_test "print/a &sum" ".*= $hex.*<sum>.*"
+# If the constant below is larger than the length of main, then
+# this test will (incorrectly) fail.  So use a small number.
+gdb_test "print/a main+4" ".*= $hex.*<.*>.*"
+gdb_test "print/a \$pc" ".*= $hex.*<do_vars+.*>.*"
+gdb_test "print/a &&j" ".*A .* error in expression.*"
+
+# Done!
+#
+
+exit $GRET
+
+interact

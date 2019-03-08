@@ -1,0 +1,67 @@
+#!/usr/bin/expect -f 
+# Copyright (C) 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This test tries to disassemble over the boundary between two compilation
+# units displaying source lines.  This checks that the disassemble routine
+# can handle our use of line number 0 to mark the end of sequence.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+#if { [prepare_for_testing disasm-end-cu.exp "disasm-end-cu" {disasm-end-cu-1.c disasm-end-cu-2.c} {debug}] } {
+#    return -1
+#}
+
+gdb_test "'$GDB_TOOL_DIR'gdb disasm-end-cu" "$gdb_prompt"
+if ![runto_main] {
+    exit -1
+}
+
+set main_addr [get_hexadecimal_valueof "&main" "0"]
+set dummy_3_addr [get_hexadecimal_valueof "&dummy_3" "0"]
+
+if {$main_addr == 0 || $dummy_3_addr == 0 || $dummy_3_addr <= $main_addr} {
+    send_user "Unable to extract required addresses, or addresses out of order"
+    exit -1
+}
+
+gdb_test "disassemble /m ${main_addr},${dummy_3_addr}" "Dump of assembler code from ${main_addr} to ${dummy_3_addr}:.*main.*End of assembler dump\." 
+exit $GRET
+
+interact

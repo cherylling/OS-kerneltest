@@ -1,0 +1,145 @@
+#!/usr/bin/expect -f
+# Copyright 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Tests for PR gdb/1250.
+# 2003-07-15  Michael Chastain <mec@shout.net>
+
+# This file is part of the gdb testsuite.
+
+#
+# test running programs
+#
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "gdb1250"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#     untested gdb1250.exp
+#     return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+if ![runto abort {allow-pending}] then {
+    exit 1
+}
+
+
+gdb_test "c" ""
+
+# See http://sources.redhat.com/gdb/bugs/1250
+#
+# In a nutshell: the function 'beta' ends with a call to 'abort', which
+# is a noreturn function.  So the last instruction of 'beta' is a call
+# to 'abort'.  When gdb looks for information about the caller of
+# 'beta', it looks at the instruction after the call to 'abort' -- which
+# is the first instruction of 'alpha'!  So gdb uses the wrong frame
+# information.  It thinks that the test program is in 'alpha' and that
+# the prologue "push %ebp / mov %esp,%ebp" has not been executed yet,
+# and grabs the wrong values.
+#
+# By the nature of the bug, it could pass if the C compiler is not smart
+# enough to implement 'abort' as a noreturn function.  This is okay.
+# The real point is that users often put breakpoints on noreturn
+# functions such as 'abort' or some kind of exitting function, and those
+# breakpoints should work.
+
+send "backtrace\n"
+expect {
+    -timeout 5
+    -re "#0.*abort.*\r\n#1.*beta.*\r\n#2.*alpha.*\r\n#3.*main.*$gdb_prompt" {
+	pass "backtrace from abort"
+    }
+    -re "#0.*abort.*\r\n#1.*beta.*$gdb_prompt" {
+	# This happens with gdb HEAD as of 2003-07-13, with gcc 3.3,
+	# binutils 2.14, either -gdwarf-2 or -gstabs+, on native
+	# i686-pc-linux-gnu.
+	#
+	# gdb gets 'abort' and 'beta' right and then goes into the
+	# weeds.
+	fail "gdb/1250" "backtrace from abort"
+    }
+    timeout {
+        fail "timeout"
+    }
+}
+
+gdb_exit
+exit $GRET
+
+interact

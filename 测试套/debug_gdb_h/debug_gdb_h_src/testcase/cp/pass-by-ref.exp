@@ -1,0 +1,68 @@
+#!/usr/bin/expect -f 
+# Copyright 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Check that GDB can call C++ functions whose parameters have
+# object type, but are passed by reference.
+
+#if { [skip_cplus_tests] } { continue }
+
+set testfile "pass-by-ref"
+set srcfile ${testfile}.cc
+#set binfile ${objdir}/${subdir}/${testfile}
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" \
+#	  executable {debug c++}] != "" } {
+#    untested pass-by-ref.exp
+#    return -1
+#}
+
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+if ![runto_main] then {
+    exit -1
+}
+
+gdb_test "print foo (global_obj)" " = 3" "call function in obj"
+gdb_test "print blap (global_derived)" " = 3" "call function in derived"
+gdb_test "print blip (global_container)" " = 3" "call function in container"
+exit $GRET
+
+interact

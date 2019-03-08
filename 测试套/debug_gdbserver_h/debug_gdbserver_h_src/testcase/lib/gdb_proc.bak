@@ -1,0 +1,872 @@
+#!/usr/bin/expect -f 
+
+global GRET;
+global ARGC;
+global target_ip
+global target_prompt
+global target_dir
+global BUFFER
+global GDBPROMPT
+global gdb_prompt
+global ARCH
+global GDB_TOOL_DIR
+
+global test_username test_password  target_passwd GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt HOST_SDK_LIB_DIR
+set test_username "xx"
+set test_password "xx"
+set target_passwd "xx"
+set GDBSERVER_TOOL_DIR "xx"
+set HOST_GDB_TOOL "xx"
+set HOST_SDK_LIB_DIR "xx"
+set host_ip "x.x.x.x"
+set host_prompt "xx"
+
+set ARCH "xx"
+set target_ip "x.x.x.x"
+set target_prompt "xx"
+set GDB_TOOL_DIR "xx"
+set target_dir ""
+set GRET 0;
+set ARGC 0;
+set GDBPROMPT "(gdb)"
+set gdb_prompt $GDBPROMPT
+global hex
+set hex "0x\[0-9A-Fa-f\]+"
+global decimal
+set decimal "\[0-9\]+"
+global debug_format
+set debug_format "unknown"
+global machine_name
+set inferior_exited_re "(\\\[Inferior \[0-9\]+ \\(.*\\) exited)"
+global inferior_exited_re
+
+proc cmd_retkey {args} {
+    global GRET;
+    global BUFFER
+    set command [lindex $args 0]
+    set retkey [lindex $args 1]
+#    send_user "\n --- $command \n"
+    send "$command\n"
+    expect {
+        -timeout 10
+        -re "$retkey" {
+            set BUFFER $expect_out(0,string)
+#            send_user "\n$command string key match $retkey\n"
+            return 0
+        }
+        timeout {
+            send_user "\n ---***--- $command string key mismatch $retkey ---***--- \n"
+            set GRET [expr $GRET + 1]
+            return 1
+        }
+    }
+}
+
+proc test_ok {} {
+    send_user "is ok!\n"
+    return 3 
+}
+
+proc login_board {} {
+	global target_ip
+	global target_prompt
+
+	spawn ssh root@$target_ip
+	expect {
+		-timeout 2
+		-re "$target_prompt*" {
+			return 1
+		}
+		timeout {
+			send_user "\n*****error: ssh root@$target_ip failed*****\n"
+			return 0
+		}
+	}
+}
+
+proc gdb_run_cmd {args} {
+   global GDBPROMPT 
+
+   set timeout 1
+
+   send "run $args\n"
+   expect {
+	-re "\\(y or n\\)"	{send "y\n"}
+   }
+
+   return 1
+}
+
+proc runto { function args } {
+
+	delete_breakpoints    
+
+    if ![gdb_breakpoint $function [lindex $args 0]] {
+        return 0;
+    }
+
+#    gdb_run_cmd 
+#    send "c\n"
+
+    return 1;
+}
+
+proc gdb_breakpoint { function args } {
+    global gdb_prompt GRET
+
+    set pending_response n
+    if {[lsearch -exact [lindex $args 0] allow-pending] != -1} {
+    set pending_response y
+    }
+
+    set break_command "break"
+    set break_message "Breakpoint"
+    if {[lsearch -exact [lindex $args 0] temporary] != -1} {
+    set break_command "tbreak"
+    set break_message "Temporary breakpoint"
+    }
+
+    set no_message 0
+    if {[lsearch -exact [lindex $args 0] no-message] != -1} {
+    set no_message 1
+    }
+
+    send "$break_command $function\n"
+    expect {
+    -timeout 30
+    -re "$break_message \[0-9\]* at .*: file .*, line .*$gdb_prompt" {}
+    -re "$break_message \[0-9\]*: file .*, line .*$gdb_prompt" {}
+    -re "$break_message \[0-9\]* at .*$gdb_prompt" {}
+    -re "$break_message \[0-9\]* \\(.*\\) pending.*$gdb_prompt" {
+        if {$pending_response == "n"} {
+            if { $no_message == 0 } {
+                send_user "fail setting breakpoint at $function"
+            set GRET [expr $GRET + 1]
+            }
+            return 0
+        }
+    }
+    -re "Make breakpoint pending" {
+        send "$pending_response\n"
+        exp_continue
+    }
+    -re "A problem internal to GDB has been detected" {
+        send_user "fail setting breakpoint at $function in runto (GDB internal error)"
+            set GRET [expr $GRET + 1]
+        gdb_internal_error_resync
+        return 0
+    }
+    timeout {
+        if { $no_message == 0 } {
+            send_user "fail setting breakpoint at $function (timeout)"
+            set GRET [expr $GRET + 1]
+        }
+        return 0
+    }
+    }    
+
+	return 1
+}
+
+proc perror {args} {
+	send_user "$args"
+}
+
+proc send_gdb { string } {
+    send "$string"
+	return 1
+}
+
+proc gdb_test_no_output { args } {
+	global GDBPROMPT
+	set cmd [lindex $args 0]
+	gdb_test $cmd "$GDBPROMPT*" ""
+}
+
+proc gdb_test {args} {
+    global GRET;
+    set command [lindex $args 0]
+    set retkey [lindex $args 1]
+
+    send "$command\n"
+    expect {
+        -timeout 15
+        -re "$retkey" {
+            return 1
+        }
+        timeout {
+            send_user "\n*****error: $command string key mismatch $retkey *****\n"
+            set GRET [expr $GRET + 1]
+            return 0
+        }
+    }
+	return 1
+}
+
+proc gdb_get_line_number { text { file "" } } {
+#    global srcdir
+#    global subdir
+    global srcfile
+
+    if { "$file" == "" } then {
+		set file "$srcfile"
+    }
+#    if { ! [regexp "^/" "$file"] } then {
+#	set file "$srcdir/$subdir/$file"
+#    }
+
+    if { [ catch { set fd [open "$file"] } message ] } then {
+	perror "$message"
+	return -1
+    }
+
+    set found -1
+    for { set line 1 } { 1 } { incr line } {
+	if { [ catch { set nchar [gets "$fd" body] } message ] } then {
+	    perror "$message"
+	    return -1
+	}
+	if { $nchar < 0 } then {
+	    break
+	}
+	if { [string first "$text" "$body"] >= 0 } then {
+	    set found $line
+	    break
+	}
+    }
+
+    if { [ catch { close "$fd" } message ] } then {
+	perror "$message"
+	return -1
+    }
+
+    return $found
+}
+
+proc gdb_expect { args } {
+    if { [llength $args] == 2  && [lindex $args 0] != "-re" } {
+    set atimeout [lindex $args 0];
+    set expcode [list [lindex $args 1]];
+    } else {
+    set expcode $args;
+    }
+
+    upvar timeout timeout;
+
+#    if [target_info exists gdb,timeout] {
+#    }
+
+}
+
+proc delete_breakpoints {}  {
+   global GDBPROMPT 
+
+   set timeout 1
+
+   send "delete breakpoints\n"
+   expect {
+	-re "\\(y or n\\)"	{send "y\n"}
+   }
+	
+   return 1
+}
+
+proc gdb_run_cmd {args} {
+    global GDBPROMPT
+	set timeout 1
+
+	send "run $args\n"
+	expect {
+		-re "\\(y or n\\)" {send "y\n"}
+	}
+
+	return 1
+}
+
+proc runto_main {args} {
+	return [runto main]
+}
+
+#proc target_info { op args } {
+#    return [eval "board_info target \"$op\" $args"]
+#}
+
+proc gdb_continue_to_end {{mssg ""} {command continue} {allow_extra 0}} {
+#	global inferior_exited_re use_gdb_stub
+#
+#	if {$mssg == ""} {
+#		set text "continue until exit"
+#	} else {
+#      set text "continue until exit at $mssg"
+# }
+#  if {$allow_extra} {
+#      set extra ".*"
+#  } else {
+#      set extra ""
+# }
+#  if $use_gdb_stub {
+#    if {![gdb_breakpoint "exit"]} {
+#      return 0
+#    }
+    gdb_test $command "Continuing..* .*exit.*" "" 
+#    $text
+#  } else {
+#    # Continue until we exit.  Should not stop again.
+#    # Don't bother to check the output of the program, that may be
+#    # extremely tough for some remote systems.
+#    gdb_test $command \
+#      "Continuing.\[\r\n0-9\]+${extra}(... EXIT code 0\[\r\n\]+|$inferior_exited_re normally).*"\
+#    $text
+#  }
+}
+
+proc gdb_continue_to_breakpoint {name {location_pattern .*}} {
+    global gdb_prompt
+    global GRET
+
+    send "continue\n"
+    expect {
+        -re "Breakpoint .* (at|in).*$gdb_prompt" { }
+        timeout {
+            send "\n*****error:gdb_continue_to_breakpoint failed*****\n"  
+            set GRET [expr $GRET + 1]
+            return 0
+        }
+    }
+    return 1
+}	
+
+proc get_integer_valueof { exp default } {
+	global gdb_prompt
+	global GRET
+	
+	set test "get integer valueof \"${exp}\""
+	set val ${default}
+	send "print /d ${exp}\n"
+	expect {
+		-re "\\$\[0-9\]* = (\[-\]*\[0-9\]*).*$gdb_prompt*" {
+			set val $expect_out(1,string)	
+		}
+		timeout {
+			send_user "*****error:\n$test (timeout)\n*****"
+			set GRET [expr $GRET + 1]
+		}
+	}
+
+	return ${val}
+}
+
+proc get_hexadecimal_valueof { exp default } {
+	global gdb_prompt
+	global GRET
+	
+	set test "get hexadecimal valueof \"${exp}\""
+	send "print /x ${exp}\n"
+	expect {
+		-re "\\$\[0-9\]* = (0x\[0-9a-zA-Z\]+).*$gdb_prompt*" {
+			set val $expect_out(1,string)	
+		}
+		timeout {
+			set val ${default}
+			send_user "*****error:\n$test (timeout)\n*****"
+			set GRET [expr $GRET + 1]
+		}
+	}
+
+	return ${val}
+}
+
+proc get_sizeof { type default } {
+	return [get_integer_valueof "sizeof (${type})" $default]
+}
+
+proc string_to_regexp {str} {
+	set result $str
+	regsub -all {[]*+.|()^$\[\\]} $str {\\&} result
+	return $result
+}
+
+proc gdb_test_sequence { command test_name expected_output_list } {
+    global gdb_prompt
+    if { $test_name == "" } {
+	set test_name $command
+    }
+    lappend expected_output_list ""; # implicit ".*" before gdb prompt
+    send_gdb "$command\n"
+    return [gdb_expect_list $test_name "$gdb_prompt $" $expected_output_list]
+}
+
+proc gdb_expect_list {test sentinel list} {
+    global gdb_prompt
+    global suppress_flag
+    set index 0
+    set ok 1
+    set suppress_flag 0
+    if { $suppress_flag } {
+	set ok 0
+#	unresolved "${test}"
+    }
+    while { ${index} < [llength ${list}] } {
+	set pattern [lindex ${list} ${index}]
+        set index [expr ${index} + 1]
+#	verbose -log "gdb_expect_list pattern: /$pattern/" 2
+	if { ${index} == [llength ${list}] } {
+	    if { ${ok} } {
+		gdb_expect {
+		    -re "${pattern}${sentinel}" {
+			# pass "${test}, pattern ${index} + sentinel"
+		    }
+		    -re "${sentinel}" {
+			send_user "fail ${test} (pattern ${index} + sentinel)"
+            set GRET [expr $GRET + 1]
+			set ok 0
+		    }
+		    -re ".*A problem internal to GDB has been detected" {
+			send_user "fail ${test} (GDB internal error)"
+            set GRET [expr $GRET + 1]
+			set ok 0
+			gdb_internal_error_resync
+		    }
+		    timeout {
+			send_user "fail ${test} (pattern ${index} + sentinel) (timeout)"
+            set GRET [expr $GRET + 1]
+			set ok 0
+		    }
+		}
+	    } else {
+		# unresolved "${test}, pattern ${index} + sentinel"
+	    }
+	} else {
+	    if { ${ok} } {
+		gdb_expect {
+		    -re "${pattern}" {
+			# pass "${test}, pattern ${index}"
+		    }
+		    -re "${sentinel}" {
+			send_user "fail ${test} (pattern ${index})"
+            set GRET [expr $GRET + 1]
+			set ok 0
+		    }
+		    -re ".*A problem internal to GDB has been detected" {
+			send_user "fail ${test} (GDB internal error)"
+            set GRET [expr $GRET + 1]
+			set ok 0
+			gdb_internal_error_resync
+		    }
+		    timeout {
+			send_user "fail ${test} (pattern ${index}) (timeout)"
+            set GRET [expr $GRET + 1]
+			set ok 0
+		    }
+		}
+	    } else {
+		# unresolved "${test}, pattern ${index}"
+	    }
+	}
+    }
+    if { ${ok} } {
+#	pass "${test}"
+	return 0
+    } else {
+	return 1
+    }
+}
+
+proc gdb_exit {args} {
+    global GDBPROMPT
+
+    set timeout 1
+
+    send "q\n"
+    expect {
+     -re "\\(y or n\\)"  {send "y\n"}
+    }
+
+    return 1
+}
+
+proc test_print_reject { args } {
+    global gdb_prompt
+    global GRET
+
+    if [llength $args]==2 then {
+        set expectthis [lindex $args 1]
+    } else {
+        set expectthis "should never match this bogus string"
+    }
+    set sendthis [lindex $args 0]
+#    if $verbose>2 then {
+#        send_user "Sending \"$sendthis\" to gdb\n"
+#        send_user "Looking to match \"$expectthis\"\n"
+#    }
+    send_gdb "$sendthis\n"
+    #FIXME: Should add timeout as parameter.
+    gdb_expect {
+        -re "A .* in expression.*\\.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "Invalid syntax in expression.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "Junk after end of expression.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "Invalid number.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "Invalid character constant.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "No symbol table is loaded.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "No symbol .* in current context.*$gdb_prompt" {
+#           pass "reject $sendthis"
+            return 1
+        }
+        -re "Unmatched single quote.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+       -re "A character constant must contain at least one character.*gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+        -re "$expectthis.*$gdb_prompt" {
+#            pass "reject $sendthis"
+            return 1
+        }
+#        -re ".*$gdb_prompt" {
+#            send_user "fail reject $sendthis"
+#            return 1
+#        }
+        default {
+#            send_user "fail reject $sendthis (eof or timeout)"
+            send_user "\n*****error:test_print_reject failed******\n"
+            set GRET [expr $GRET + 1]
+            return 0
+        }
+    }
+}
+
+proc rerun_to_main {} {
+  global gdb_prompt 
+
+      send "run\n"
+      expect {
+          -re "The program .* has been started already.*y or n." {
+              send "y\n"
+              exp_continue
+          }
+          -re "Starting program.*$gdb_prompt" {
+              send_user "pass rerun to main" 
+              return 0
+          }
+          timeout {
+              send_user "fail (timeout) rerun to main" 
+              return 1
+          }
+      }
+}
+
+proc get_hexadecimal_valueof { exp default } {
+    global gdb_prompt GRET
+    send "print /x ${exp}\n"
+    set test "get hexadecimal valueof \"${exp}\""
+    expect {
+	-re "\\$\[0-9\]* = (0x\[0-9a-zA-Z\]+).*$gdb_prompt" {
+	    set val $expect_out(1,string)
+#	    pass "$test"
+	}
+	timeout {
+	    set val ${default}
+	    send_user "$test (timeout)"
+        set GRET [expr $GRET + 1]
+	}
+    }
+    return ${val}
+}
+# Test the output of GDB_COMMAND matches the pattern obtained
+# by concatenating all elements of EXPECTED_LINES.  This makes
+# it possible to split otherwise very long string into pieces.
+# If third argument is not empty, it's used as the name of the
+# test to be printed on pass/fail.
+proc help_test_raw { gdb_command expected_lines args } {
+    set message $gdb_command
+    if [llength $args]>0 then {
+	set message [lindex $args 0]
+    } 
+    set expected_output [join $expected_lines ""]
+    gdb_test "${gdb_command}" "${expected_output}" $message
+}
+
+# Test the output of "help COMMAND_CLASS". EXPECTED_INITIAL_LINES
+# are regular expressions that should match the beginning of output,
+# before the list of commands in that class.  The presence of 
+# command list and standard epilogue will be tested automatically.
+proc test_class_help { command_class expected_initial_lines args } {
+    set l_stock_body {
+        "List of commands\:.*\[\r\n\]+"
+    }
+#        "Type \"help\" followed by command name for full documentation\.\[\r\n\]+"
+#        "Type \"apropos word\" to search for commands related to \"word\"\.[\r\n\]+"
+#        "Command name abbreviations are allowed if unambiguous\." 
+    set l_entire_body [concat $expected_initial_lines $l_stock_body]
+
+    eval [list help_test_raw "help ${command_class}" $l_entire_body] $args
+}
+
+# COMMAND_LIST should have either one element -- command to test, or
+# two elements -- abbreviated command to test, and full command the first
+# element is abbreviation of.
+# The command must be a prefix command.  EXPECTED_INITIAL_LINES
+# are regular expressions that should match the beginning of output,
+# before the list of subcommands.  The presence of 
+# subcommand list and standard epilogue will be tested automatically.
+proc test_prefix_command_help { command_list expected_initial_lines args } {
+    set command [lindex $command_list 0]   
+    if {[llength $command_list]>1} {        
+        set full_command [lindex $command_list 1]
+    } else {
+        set full_command $command
+    }
+    # Use 'list' and not just {} because we want variables to
+    # be expanded in this list.
+    set l_stock_body [list\
+         "List of $full_command subcommands\:.*\[\r\n\]+"]
+#         "Type \"help $full_command\" followed by $full_command subcommand name for full documentation\.\[\r\n\]+"\
+#         "Type \"apropos word\" to search for commands related to \"word\"\.\[\r\n\]+"\
+#         "Command name abbreviations are allowed if unambiguous\."]
+    set l_entire_body [concat $expected_initial_lines $l_stock_body]
+    if {[llength $args]>0} {
+        help_test_raw "help ${command}" $l_entire_body [lindex $args 0]
+    } else {
+        help_test_raw "help ${command}" $l_entire_body
+    }
+}
+
+proc gdb_touch_execfile { binfile } {
+    set time [clock seconds]
+    file mtime ${binfile} $time
+    if { ${binfile} != ${binfile} } {
+	file mtime ${binfile} $time
+    }
+}
+
+proc gdb_start_cmd {args} {
+    global gdb_prompt use_gdb_stub
+
+    send "start $args\n"
+    # Use -notransfer here so that test cases (like chng-sym.exp)
+    # may test for additional start-up messages.
+    expect {
+	-re "The program .* has been started already.*y or n." {
+	    send "y\n"
+	    exp_continue
+	}
+	-notransfer -re "Starting program: \[^\r\n\]*" {
+	    return 0
+	}
+    }
+    return -1
+}
+# Run the gdb command "info source" and extract the debugging format
+# information from the output and save it in debug_format.
+
+proc get_debug_format { } {
+    global gdb_prompt
+    global verbose
+    global expect_out
+    global debug_format
+
+    set debug_format "unknown"
+    send "info source\n"
+    expect {
+	-re "Compiled with (.*) debugging format..*$gdb_prompt" {
+	    set debug_format $expect_out(1,string)
+#	    verbose "debug format is $debug_format"
+	    return 1;
+	}
+	-re "No current source file..*$gdb_prompt" {
+#	    perror "get_debug_format used when no current source file"
+	    return 0;
+	}
+	timeout {
+#	    warning "couldn't check debug format (timed out)."
+	    return 1;
+	}
+    }
+}
+# Same as gdb_test, but the second parameter is not a regexp,
+# but a string that must match exactly.
+
+proc gdb_test_exact { args } {
+    upvar timeout timeout
+
+    set command [lindex $args 0]
+
+    # This applies a special meaning to a null string pattern.  Without
+    # this, "$pattern\r\n$gdb_prompt $" will match anything, including error
+    # messages from commands that should have no output except a new
+    # prompt.  With this, only results of a null string will match a null
+    # string pattern.
+
+    set pattern [lindex $args 1]
+    if [string match $pattern ""] {
+	set pattern [string_to_regexp [lindex $args 0]]
+    } else {
+	set pattern [string_to_regexp [lindex $args 1]]
+    }
+
+    # It is most natural to write the pattern argument with only
+    # embedded \n's, especially if you are trying to avoid Tcl quoting
+    # problems.  But gdb_expect really wants to see \r\n in patterns.  So
+    # transform the pattern here.  First transform \r\n back to \n, in
+    # case some users of gdb_test_exact already do the right thing.
+    regsub -all "\r\n" $pattern "\n" pattern
+    regsub -all "\n" $pattern "\r\n" pattern
+    if [llength $args]==3 then {
+	set message [lindex $args 2]
+    } else {
+	set message $command
+    }
+
+    return [gdb_test $command $pattern $message]
+}
+
+proc test_debug_format {format} {
+    global debug_format
+
+    return [expr [string match $format $debug_format] != 0]
+}
+# Print a message and return true if a test should be skipped
+# due to lack of stdio support.
+
+proc gdb_skip_stdio_test { msg } {
+#    if [target_info exists gdb,noinferiorio] {
+#	verbose "Skipping test '$msg': no inferior i/o.";
+	return 1;
+#    }
+#    return 0;
+}
+# Print a message and return true if a test should be skipped
+# due to lack of floating point suport.
+
+proc gdb_skip_float_test { msg } {
+#    if [target_info exists gdb,skip_float_tests] {
+#	verbose "Skipping test '$msg': no float tests.";
+	return 1;
+#    }
+#    return 0;
+}
+
+proc gdb_continue { function } {
+    global decimal
+
+    return [gdb_test "continue" ".*Breakpoint $decimal, $function .*" "continue to $function"];
+}
+
+proc with_test_prefix { prefix body } {
+    global pf_prefix
+
+        set saved $pf_prefix
+        append pf_prefix " " $prefix ":"
+        set code [catch {uplevel 1 $body} result]
+        set pf_prefix $saved
+
+        if {$code == 1} { 
+            global errorInfo errorCode
+                return -code $code -errorinfo $errorInfo -errorcode $errorCode $result
+        } else {
+            return -code $code $result
+        }
+}
+
+proc gdb_load_cmd { args } {
+    global gdb_prompt
+
+#    if [target_info exists gdb_load_timeout] {
+#	set loadtimeout [target_info gdb_load_timeout]
+#    } else {
+	set loadtimeout 1600
+#    }
+    send "load $args\n"
+#    verbose "Timeout is now $loadtimeout seconds" 2
+    expect {
+	-re "Loading section\[^\r\]*.*" {
+	    exp_continue
+	}
+	-re "Start address\[\r\]*.*" {
+	    exp_continue
+	}
+	-re "Transfer rate\[\r\]*.*" {
+	    exp_continue
+	}
+	-re "Memory access error\[^\r\]*.*" {
+	    perror "Failed to load program"
+        set GRET [expr $GRET + 1]
+	    return -1
+	}
+	-re "$gdb_prompt" {
+	    return 0
+	}
+	-re ".*$gdb_prompt" {
+	    perror "Unexpected reponse from 'load' -- $expect_out(1,string)"
+        set GRET [expr $GRET + 1]
+	    return -1
+	}
+	timeout {
+	    perror "Timed out trying to load $args."
+        set GRET [expr $GRET + 1]
+	    return -1
+	}
+ }
+    set GRET [expr $GRET + 1]
+    return -1
+}
+
+proc fail { msg } {
+    global GRET
+    send_user "\n\nfail : $msg\n\n"
+    incr GRET
+}
+
+proc pass { msg } {
+    send_user "pass : $msg\n"
+}
+
+proc ssh_on_to_target {} {
+    global target_ip FLAG target_passwd target_prompt GRET 
+    send "ssh root@$target_ip\n"
+    expect {
+    -timeout 5
+    -re "yes\/no" {
+        send "yes\n"
+        if { $FLAG == 1 } {
+            } else {
+                set FLAG [expr $FLAG + 1]
+                exp_continue
+            }
+        }
+    -re "assword:" {
+        send "$target_passwd\n"
+        if { $FLAG == 1 } {
+            } else {
+                incr FLAG 
+                exp_continue
+            }
+        }
+    -re "$target_prompt" {
+        set FLAG 0
+        }
+    timeout {
+        set GRET [expr $GRET + 1]
+        }
+    }
+}

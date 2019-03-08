@@ -1,0 +1,136 @@
+#!/usr/bin/expect -f
+# Copyright (C) 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test inferior can stop at its very first instruction, usually "_start".
+# Dynamic executables have first instruction in ld.so.
+
+# If we're using a stub, we'll already be debugging a live program and
+# stopped at the entry point when we connect, and so the runto below
+# will issue a "continue", which always skips any breakpoint at PC.
+# When testing with a native target (or some other target that supports
+# "run"), runto will do a "run", which first creates the process,
+# leaving the PC at the entry point, just like the stub case, but then
+# continues the process with the equivalent of "jump *$PC", which
+# triggers any breakpoint at $PC.  The latter is what we want to test.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "advance"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+set testfile break-entry
+
+#if [target_info exists use_gdb_stub] {
+#    untested ${testfile}.exp
+#    return
+#}
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile} start.c {additional_flags=-static}] } {
+#    return -1
+#}
+
+set test "info files"
+set entry ""
+send "$test\n" 
+expect {
+    -re "\r\n\[\t \]*Entry point:\[\t \]*(0x\[0-9a-f\]+)\r\n.*$gdb_prompt" {
+	set entry $expect_out(1,string)
+	pass $test
+    }
+}
+if {$entry == ""} {
+#    untested ${testfile}.exp
+#    return
+    exit $GRET
+}
+
+#if {[istarget powerpc64-*] && [is_lp64_target]} {
+#    set test "convert entry point"
+#    gdb_test_multiple "p *(void(*)(void) *) $entry" $test {
+#	-re " =( \\(\[^0-9\]*\\))? (0x\[0-9a-f\]+)( <.*)?\r\n$gdb_prompt $" {
+#	    set entry $expect_out(2,string)
+#	    pass $test
+#	}
+#    }
+#}
+
+if ![runto "*$entry"] {
+    exit 1
+}
+
+gdb_test "c"  ""
+gdb_test {p/x $pc} " = $entry"
+
+gdb_breakpoint "main"
+gdb_continue_to_breakpoint "main" "\\.?main.*"
+gdb_exit
+exit $GRET
+
+interact

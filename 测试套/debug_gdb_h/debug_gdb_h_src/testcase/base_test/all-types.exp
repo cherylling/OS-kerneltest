@@ -1,0 +1,92 @@
+#!/usr/bin/expect -f
+
+#   Copyright 1998-1999, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+source ../lib/gdb_proc.exp
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+set false 0             
+set true 1             
+global GDBPROMPT
+global target_ip 
+global target_prompt
+
+spawn ssh root@$target_ip
+
+expect {
+    -timeout 2
+        -re "$target_prompt*" {
+#            send_user "string key match while ssh $target_ip"
+        }   
+    timeout {
+#        send_user "Please check string key while ssh $target_ip"
+            set GRET [expr $GRET + 1]
+    }   
+}
+
+cmd_retkey "cd /tmp/for_gdb_test/base_test" "$target_prompt*" 
+cmd_retkey "'$GDB_TOOL_DIR'gdb all-types" "$GDBPROMPT" 
+cmd_retkey "b main" "$GDBPROMPT"
+cmd_retkey "r" ".*dummy\\(\\);"
+cmd_retkey "next" "return 0;" 
+cmd_retkey "print v_int+v_char" " = 71" 
+cmd_retkey "print v_int+v_short" " = 9"
+cmd_retkey "print v_int+v_signed_char" " = 72" 
+cmd_retkey "print v_int+v_unsigned_char" " = 73" 
+cmd_retkey "print v_int+v_signed_short" " = 10" 
+cmd_retkey "print v_int+v_unsigned_short" " = 11" 
+cmd_retkey "print v_int+v_signed_int" " = 13" 
+cmd_retkey "print v_int+v_unsigned_int" " = 14" 
+cmd_retkey "print v_int+v_long" " = 15" 
+cmd_retkey "print v_int+v_signed_long" " = 16" 
+cmd_retkey "print v_int+v_unsigned_long" " = 17" 
+cmd_retkey "print v_int+v_float" " = 106.34343.*" 
+cmd_retkey "print v_int+v_double" " = 206.565.*" 
+cmd_retkey "print v_int <= v_char" " = 1" 
+cmd_retkey "print v_int <= v_short" " = $false" 
+cmd_retkey "print v_int <= v_signed_char" " = 1" 
+cmd_retkey "print v_int <= v_unsigned_char" " = 1" 
+cmd_retkey "print v_int <= v_signed_short" " = $false" 
+cmd_retkey "print v_int <= v_unsigned_short" " = $false" 
+cmd_retkey "print v_int <= v_signed_int" " = $true" 
+cmd_retkey "print v_int <= v_unsigned_int" " = $true" 
+cmd_retkey "print v_int <= v_long" " = $true" 
+cmd_retkey "print v_int <= v_signed_long" " = $true" 
+cmd_retkey "print v_int <= v_unsigned_long" " = $true" 
+cmd_retkey "print v_int <= v_float" " = $true" 
+cmd_retkey "print v_int <= v_double" " = $true" 
+cmd_retkey "set variable v_char=0" "$GDBPROMPT"
+cmd_retkey "set variable v_double=0.0" "$GDBPROMPT"
+cmd_retkey "set variable v_unsigned_long=0" "$GDBPROMPT" 
+cmd_retkey "print v_int && v_char" " = $false"
+cmd_retkey "print v_int && v_short" " = $true" 
+cmd_retkey "print v_int && v_signed_char" " = $true" 
+cmd_retkey "print v_int && v_unsigned_char" " = $true" 
+cmd_retkey "print v_int && v_signed_short" " = $true" 
+cmd_retkey "print v_int && v_unsigned_short" " = $true" 
+cmd_retkey "print v_int && v_signed_int" " = $true" 
+cmd_retkey "print v_int && v_unsigned_int" " = $true" 
+cmd_retkey "print v_int && v_long" " = $true" 
+cmd_retkey "print v_int && v_signed_long" " = $true" 
+cmd_retkey "print v_int && v_unsigned_long" " = $false" 
+cmd_retkey "print v_int && v_float" " = $true"
+cmd_retkey "print v_int && v_double" " = $false" 
+
+exit $GRET
+
+interact

@@ -1,0 +1,162 @@
+#!/usr/bin/expect -f 
+# Copyright 2003, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+# advance.exp -- Expect script to test 'advance' in gdb
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+            send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile "advance"
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+#      gdb_exit
+
+#set testfile advance
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#remote_exec build "rm -f ${binfile}"
+#if { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#    untested advance.exp
+#    return -1
+#}
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+#gdb_load ${binfile}
+
+#if ![runto_main] then {
+#    fail "Can't run to main"
+#    exit 1
+#}
+
+gdb_test "b main" "reakpoint 1 at $hex: file advance.c, line 41.*$gdb_prompt"
+gdb_test "c" "reakpoint 1, main .* at advance.c:41.*c = 5;.*$gdb_prompt"
+
+# Verify that "advance <location>" works.  (This is really just syntactic
+# sugar for "tbreak <location>; continue".)
+#
+gdb_test "advance [gdb_get_line_number "advance this location"]" \
+	"main .* at .*:.*b = 3.*advance this location.*" \
+	"advance line number"
+
+# Verify that a malformed "advance" is gracefully caught.
+#
+if { $ARCH == "powerpc" } {
+gdb_test "advance [gdb_get_line_number "advance malformed"] then stop" \
+"Junk at end of arguments.*"
+} else {
+gdb_test "advance [gdb_get_line_number "advance malformed"] then stop" \
+    "malformed linespec error: unexpected string, \"then stop\"" \
+    "malformed advance"
+}
+
+# Verify that "advance <funcname>" works.
+#
+gdb_test "advance func" \
+	"func.*at.*x = x \\+ 5." \
+	"advance func"
+
+# Verify that "advance <funcname>" when funcname is NOT called by the current
+# frame, stops at the end of the current frame.
+#
+# gdb can legitimately stop on either the current line or the next line,
+# depending on whether the machine instruction for 'call' on the current
+# line has more instructions after it or not.
+#
+gdb_test "advance func3" \
+	"(in main|).*(func \\(c\\)|marker1 \\(\\)).*stop here after leaving current frame..."\
+	"advance function not called by current frame"
+
+# break at main again
+#
+gdb_test "break [gdb_get_line_number "break here"]" \
+	".*Breakpoint.* at .*" \
+	"set breakpoint at call to func3"
+gdb_test "continue" \
+	".*Breakpoint ${decimal}, main.*func3.*break here.*" \
+	"continue to call to func3 in main"
+
+# Verify that "advance <funcname>" when funcname is called as parameter to 
+# another function works.
+#
+gdb_test "advance foo" \
+	"foo \\(a=5\\).*int b = a \\+ 10;"\
+	"advance function called as param"
+
+# Verify that we get an error if we use 'advance' w/o argument
+#
+gdb_test "advance" \
+	"Argument required \\(a location\\)."\
+	"advance with no argument"
+
+gdb_exit
+exit $GRET
+
+interact

@@ -1,0 +1,99 @@
+#!/usr/bin/expect -f 
+# This testcase is part of GDB, the GNU debugger.
+
+# Copyright 2005, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# Test GDB's "source" command - reads in a GDB script.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base"
+gdb_test "cd /tmp/for_gdb_test/base" "$target_prompt"
+
+#if $tracelevel then {
+#	strace $tracelevel
+#}
+
+
+set testfile "structs"
+set srcfile ${testfile}.c
+set binfile ${testfile}
+
+#gdb_start
+gdb_test "'$GDB_TOOL_DIR'gdb " "$gdb_prompt"
+
+gdb_test "source source-error.gdb" \
+    "source-error.gdb:21: Error in sourced command file:\[\r\n\]*Cannot access memory at address 0x0.*" \
+    "script contains error"
+
+gdb_test "source -v source-test.gdb" \
+    "echo test source options.*" \
+    "source -v"
+
+# There was a bug where -v got stuck in the "on" position.
+# Verify "source script", without the -v, is not verbose.
+set test "source after -v"
+send "source source-test.gdb\n"
+expect {
+    -re "echo test source options.*$gdb_prompt" {
+	send_user "fail $test"
+    set GRET [expr $GRET + 1]
+    }
+    -re "test source options.*$gdb_prompt" {
+#	pass "$test"
+    }
+}
+
+gdb_test "dir ." "Source directories searched: .*" \
+    "set search directories"
+gdb_test "source -s ./source-test.gdb" \
+    "test source options" \
+    "source -s"
+
+# Test -v and -s in either order.
+gdb_test "source -s -v ./source-test.gdb" \
+    "echo test source options.*" \
+    "source -s -v"
+gdb_test "source -v -s ./source-test.gdb" \
+    "echo test source options.*" \
+    "source -v -s"
+
+gdb_exit
+exit $GRET
+
+interact

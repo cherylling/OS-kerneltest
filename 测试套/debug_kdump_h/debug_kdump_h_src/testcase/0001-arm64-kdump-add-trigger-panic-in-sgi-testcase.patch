@@ -1,0 +1,28 @@
+From 4e2beb8a9d57f6d3169e7ac3284555feb469ca03 Mon Sep 17 00:00:00 2001
+From: Chen Zhou <chenzhou10@huawei.com>
+Date: Fri, 12 Oct 2018 16:16:20 +0800
+Subject: [PATCH] arm64/kdump: add "trigger panic in sgi" testcase
+
+Signed-off-by: Chen Zhou <chenzhou10@huawei.com>
+---
+ arch/arm64/kernel/smp.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/kernel/smp.c b/arch/arm64/kernel/smp.c
+index 958e8bb..d381d5f 100644
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -773,6 +773,10 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
+ 		break;
+ #endif
+ 
++	case 8:
++		pr_info("cpu: %d, before panic.\n", smp_processor_id());
++		panic("sgi\n");
++		break;
+ 	default:
+ 		pr_crit("CPU%u: Unknown IPI message 0x%x\n", cpu, ipinr);
+ 		break;
+-- 
+1.8.3.1
+

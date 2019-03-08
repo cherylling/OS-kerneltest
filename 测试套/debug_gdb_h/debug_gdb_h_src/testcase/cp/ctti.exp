@@ -1,0 +1,140 @@
+#!/usr/bin/expect -f 
+# Copyright 1998-1999, 2001, 2003-2004, 2007-2012 Free Software
+# Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file is part of the gdb testsuite
+# file written by Elena Zannoni (ezannoni@cygnus.com)
+# rewritten by Michael Chastain (mec.gnu@mindspring.com)
+#
+# source files cttiadd.cc, cttiadd1.cc, cttiadd2.cc, cttiadd3.cc
+
+# Call to template instantiations.
+
+#if { [skip_cplus_tests] } { continue }
+
+set testfile "cttiadd"
+set srcfile  "${testfile}.cc"
+set srcfile1 "${testfile}1.cc"
+set srcfile2 "${testfile}2.cc"
+set srcfile3 "${testfile}3.cc"
+set objfile  "${testfile}.o"
+set objfile1 "${testfile}1.o"
+set objfile2 "${testfile}2.o"
+set objfile3 "${testfile}3.o"
+#set binfile  "${objdir}/${subdir}/${testfile}"
+
+#if { [gdb_compile "$srcdir/$subdir/$srcfile" "$objdir/$subdir/$objfile" object {debug c++}] != "" } {
+#     untested ctti.exp
+#     return -1
+#}
+
+#if { [gdb_compile "$srcdir/$subdir/$srcfile1" "$objdir/$subdir/$objfile1" object {debug c++}] != "" } {
+#     untested ctti.exp
+#     return -1
+#}
+
+#if { [gdb_compile "$srcdir/$subdir/$srcfile2" "$objdir/$subdir/$objfile2" object {debug c++}] != "" } {
+#     untested ctti.exp
+#     return -1
+#}
+
+#if { [gdb_compile "$srcdir/$subdir/$srcfile3" "$objdir/$subdir/$objfile3" object {debug c++}] != "" } {
+#     untested ctti.exp
+#     return -1
+#}
+
+#if { [gdb_compile "$objdir/$subdir/$objfile $objdir/$subdir/$objfile1 $objdir/$subdir/$objfile2 $objdir/$subdir/$objfile3" "${binfile}" executable {debug c++}] != "" } {
+#     untested ctti.exp
+#     return -1
+#}
+
+#if [get_compiler_info ${binfile} "c++"] {
+#    return -1;
+#}
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+set ARGC $argc
+global GDBPROMPT
+global GDB_TOOL_DIR
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/cp"
+gdb_test "cd /tmp/for_gdb_test/cp" "$target_prompt"
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$gdb_prompt"
+
+
+if ![runto_main] then {
+#    perror "couldn't run to breakpoint"
+#    continue
+    exit -1
+}
+
+gdb_breakpoint [gdb_get_line_number "marker add1"]
+gdb_continue_to_breakpoint "marker add1"
+
+gdb_test "print c" "\\$\[0-9\]+ = 194 .*"
+gdb_test "print f" "\\$\[0-9\]+ = 9"
+gdb_test "print i" "\\$\[0-9\]+ = 4"
+
+# TODO: this needs more work before actually deploying it.
+# So bail out here.
+
+#if { [ test_compiler_info gcc-*] } then { continue }
+
+gdb_test "print add<int>(2,2)"  "\\$\[0-9\]+ = 4.*$gdb_prompt"
+
+# Note: 2.25 and 4.5 are exactly representable in IEEE-ish formats
+gdb_test "print add<float>(2.25,2.25)" "\\$\[0-9\]+ = 4\\.5.*$gdb_prompt" 
+
+gdb_test "print add<unsigned char>('A','A')" "\\$\[0-9\]+ = 130 .*$gdb_prompt" 
+
+gdb_test "print add2<int>(2,2)" "\\$\[0-9\]+ = 4.*$gdb_prompt" 
+
+gdb_test "print add2<float>(2.25,2.25)" "\\$\[0-9\]+ = 4\\.5.*$gdb_prompt" 
+
+gdb_test "print add2<unsigned char>('A','A')" "\\$\[0-9]+ = 130 .*$gdb_prompt" 
+
+gdb_test "print add3<int>(2,2)" "\\$\[0-9\]+ = 4.*$gdb_prompt" 
+
+gdb_test "print add3<float>(2.25,2.25)" "\\$\[0-9\]+ = 4\\.5.*$gdb_prompt" 
+
+gdb_test "print add3<unsigned char>('A','A')" "\\$\[0-9]+ = 130 .*$gdb_prompt" 
+
+gdb_test "print add4<int>(2,2)" "\\$\[0-9\]+ = 4.*$gdb_prompt" 
+
+gdb_test "print add4<float>(2.25,2.25)" "\\$\[0-9\]+ = 4\\.5.*$gdb_prompt" 
+
+gdb_test "print add4<unsigned char>('A','A')"  "\\$\[0-9]+ = 130 .*$gdb_prompt"
+exit $GRET
+
+interact

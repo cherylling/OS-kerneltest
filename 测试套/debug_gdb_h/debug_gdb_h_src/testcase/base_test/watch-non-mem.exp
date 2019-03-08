@@ -1,0 +1,57 @@
+#!/usr/bin/expect -f
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc             
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+        -re "$target_prompt*" {}   
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+    }   
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt" ""
+
+#
+# Tests watchpoints that watch expressions that don't involve memory.
+#
+
+set testfile watch-non-mem
+set srcfile ${testfile}.c
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT*" ""
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile} ${srcfile}] } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+if ![runto main] then {
+    puts "Can't run to main"
+    return
+}
+
+gdb_test "watch \$pc" \
+    "Watchpoint .*: .pc" \
+    "set write watchpoint on \$pc"
+
+gdb_test "continue" \
+    "Watchpoint 2: .pc.*Old value = .*New value = .*" \
+    "watchpoint on \$pc works"
+
+exit $GRET
+interact

@@ -1,0 +1,364 @@
+#!/usr/bin/expect -f 
+#   Copyright 1997, 1999, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#if { [is_remote target] || ![isnative] } then {
+#    continue
+#}
+
+
+# NOTE drow/2002-12-06: I don't know what the referenced kernel problem
+# is, but it appears to be fixed in recent HP/UX versions.
+
+##if [istarget "hppa2.0w-hp-hpux*"] {
+##  warning "Don't run gdb.base/foll-vfork.exp until JAGaa43495 kernel problem is fixed."
+##  return 0
+##}
+
+global srcfile
+set testfile "foll-vfork"
+set testfile2 "vforked-prog"
+set srcfile ${testfile}.c
+set srcfile2 ${testfile2}.c
+set binfile ${testfile}
+set binfile2 ${testfile2}
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable {debug}] != "" } {
+#     untested foll-vfork.exp
+#     return -1
+#}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile2}" "${binfile2}" executable {debug}] != "" } {
+#     untested foll-vfork.exp
+#     return -1
+#}
+
+
+# Until "set follow-fork-mode" and "catch vfork" are implemented on
+# other targets...
+#
+#if {![istarget "hppa*-hp-hpux*"] && ![istarget "*-linux*"]} then {
+#    continue
+#}
+
+# Test to see if we are on an HP-UX 10.20 and if so,
+# do not run these tests as catching vfork is disabled for
+# 10.20.
+
+#if [istarget "hppa*-hp-hpux10.20"] then {
+#    return 0
+#}
+
+# A few of these tests require a little more time than the standard
+# timeout allows.
+#set oldtimeout $timeout
+#set timeout [expr "$timeout + 10"]
+
+proc check_vfork_catchpoints {} {
+  global gdb_prompt
+  global has_vfork_catchpoints
+
+  # Verify that the system supports "catch vfork".
+  gdb_test "catch vfork" "Catchpoint \[0-9\]* \\(vfork\\)" "insert first vfork catchpoint"
+  set has_vfork_catchpoints 0
+  send "continue\n"
+  expect {
+    -re ".*Your system does not support this type\r\nof catchpoint.*$gdb_prompt" {
+      send_user "unsupported continue to first vfork catchpoint"
+    }
+    -re ".*Catchpoint.*$gdb_prompt" {
+      set has_vfork_catchpoints 1
+#      pass "continue to first vfork catchpoint"
+    }
+  }
+
+#  if {$has_vfork_catchpoints == 0} {
+#    unsupported "vfork catchpoints"
+#    return -code return
+#  }
+}
+
+proc vfork_parent_follow_through_step {} {
+   global gdb_prompt
+
+   gdb_test "set follow-fork parent"  "$gdb_prompt"
+   gdb_test "next" "Detaching after fork from.*13.*$gdb_prompt"
+   # The child has been detached; allow time for any output it might
+   # generate to arrive, so that output doesn't get confused with
+   # any gdb_expected debugger output from a subsequent testpoint.
+   #
+   exec sleep 1
+}
+
+proc vfork_parent_follow_to_bp {} {
+   global gdb_prompt
+   global srcfile
+
+   gdb_test "set follow-fork parent" "$gdb_prompt"
+   gdb_test "break ${srcfile}:18" "$gdb_prompt" 
+   gdb_test "continue" ".*Detaching after fork from child process.*Breakpoint.*18.*$gdb_prompt"
+   # The child has been detached; allow time for any output it might
+   # generate to arrive, so that output doesn't get confused with
+   # any expected debugger output from a subsequent testpoint.
+   #
+   exec sleep 1
+}
+
+proc vfork_and_exec_child_follow_to_main_bp {} {
+   global gdb_prompt
+   global binfile
+
+   gdb_test "set follow-fork child"  "$gdb_prompt"
+   gdb_test "continue" "Attaching after.* vfork to.*xecuting new program.*Breakpoint.*vforked-prog.c:9.*$gdb_prompt"
+   # The parent has been detached; allow time for any output it might
+   # generate to arrive, so that output doesn't get confused with
+   # any gdb_expected debugger output from a subsequent testpoint.
+   #
+   exec sleep 1
+
+   # Explicitly kill this child, or a subsequent rerun actually runs
+   # the exec'd child, not the original program...
+   gdb_test "kill" ".*Kill the program being debugged.*y or n."
+   send "y\n"
+   gdb_test "file $binfile" ".*Load new symbol table from.*y or n."
+   gdb_test "y"  "Reading symbols from.*$gdb_prompt" 
+}
+
+proc vfork_and_exec_child_follow_through_step {} {
+   global gdb_prompt
+   global binfile
+
+# This test cannot be performed prior to HP-UX 10.30, because ptrace-based
+# debugging of a vforking program basically doesn't allow the child to do
+# things like hit a breakpoint between a vfork and exec.  This means that
+# saying "set follow-fork child; next" at a vfork() call won't work, because
+# the implementation of "next" sets a "step resume" breakpoint at the
+# return from the vfork(), which the child will hit on its way to exec'ing.
+#
+#   if { ![istarget "hppa*-*-hpux11.*"] } {
+#      verbose "vfork child-following next test ignored for non-hppa or pre-HP/UX-10.30 targets."
+#      return 0
+#   }
+
+   gdb_test "set follow-fork child"  "$gdb_prompt"
+#   gdb_test "next" "Attaching after fork to.*Executing new program.*Breakpoint.*vforked-prog.c:9.*$gdb_prompt"
+   gdb_test "next" "Attaching after .*vfork to.*$gdb_prompt"
+   # The parent has been detached; allow time for any output it might
+   # generate to arrive, so that output doesn't get confused with
+   # any expected debugger output from a subsequent testpoint.
+   #
+   exec sleep 1
+
+   # Explicitly kill this child, or a subsequent rerun actually runs
+   # the exec'd child, not the original program...
+   gdb_test "kill" ".*Kill the program being debugged.*y or n."
+   send "y\n"
+   gdb_test "file $binfile" ".*Load new symbol table from.*y or n." 
+   gdb_test "y" "Reading symbols from.*$gdb_prompt" 
+}
+
+proc tcatch_vfork_then_parent_follow {} {
+   global gdb_prompt
+   global srcfile
+global GRET;
+
+   gdb_test "set follow-fork parent"  "$gdb_prompt"
+   gdb_test "tcatch vfork"  "Catchpoint .*(vfork).*$gdb_prompt"
+   send "continue\n"
+# HP-UX 10.20 seems to stop you in "vfork", while more recent HP-UXs
+# stop you in "_vfork".
+   expect {
+    -timeout 5
+      -re "0x\[0-9a-fA-F\]*.*(vfork|__kernel_v?syscall).*$gdb_prompt" {
+      }
+      -re "vfork \\(\\) at.*$gdb_prompt" {
+      }
+      timeout {
+      send_user "(timeout) vfork parent follow, tcatch vfork"
+      set GRET [expr $GRET + 1]
+      }
+   }
+   send "finish\n"
+   expect {
+    -timeout 5
+      -re "Run till exit from.*vfork.*0x\[0-9a-fA-F\]* in main .* at .*${srcfile}:12.*$gdb_prompt"\
+                      {
+                      #pass "vfork parent follow, finish after tcatch vfork"
+                      }
+      -re "Run till exit from.*__kernel_v?syscall.*0x\[0-9a-fA-F\]* in vfork .*$gdb_prompt" {
+	  send "finish\n"
+	  exp_continue
+      }
+      -re "Run till exit from.*vfork.*$gdb_prompt" {
+      }
+      timeout {
+      send_user "(timeout) vfork parent follow, finish after tcatch vfork" 
+      set GRET [expr $GRET + 1]
+      }
+   }
+   # The child has been detached; allow time for any output it might
+   # generate to arrive, so that output doesn't get confused with
+   # any expected debugger output from a subsequent testpoint.
+   #
+   exec sleep 1
+}
+
+proc tcatch_vfork_then_child_follow {} {
+   global gdb_prompt
+   global srcfile
+   global srcfile2
+global GRET;
+
+   gdb_test "set follow-fork child" "$gdb_prompt" 
+   gdb_test "tcatch vfork" "Catchpoint .*(vfork).*$gdb_prompt"
+   send "continue\n"
+# HP-UX 10.20 seems to stop you in "vfork", while more recent HP-UXs
+# stop you in "_vfork".
+   expect {
+    -timeout 5
+      -re "vfork \\(\\) at .*$gdb_prompt"\
+                      {#pass "vfork child follow, tcatch vfork"
+                      }
+      -re "0x\[0-9a-fA-F\]*.*(vfork|__kernel_v?syscall).*$gdb_prompt"\
+                      {#pass "vfork child follow, tcatch vfork"
+                      }
+      timeout         {
+      send_user "(timeout) vfork child follow, tcatch vfork"
+      set GRET [expr $GRET + 1]
+      }
+   }
+   send "finish\n"
+   expect {
+      -re "Run till exit from.*vfork.*${srcfile}:12.*$gdb_prompt" {
+        #pass "vfork child follow, finish after tcatch vfork"
+         }
+      -re "Run till exit from.*__kernel_v?syscall.*0x\[0-9a-fA-F\]* in vfork .*$gdb_prompt" {
+	  send "finish\n"
+	  exp_continue
+      }
+      -re "Run till exit from.*vfork.*${srcfile2}:9.*$gdb_prompt"\
+          {
+          #pass "vfork child follow, finish after tcatch vfork (followed exec)"
+          }
+      -re "Run till exit from.*vfork.*$gdb_prompt" {
+        #pass "vfork child follow, finish after tcatch vfork"
+         }
+      timeout         {
+      send_user "(timeout) vfork child follow, finish after tcatch vfork" 
+      set GRET [expr $GRET + 1]
+      }
+   }
+   # The parent has been detached; allow time for any output it might
+   # generate to arrive, so that output doesn't get confused with
+   # any expected debugger output from a subsequent testpoint.
+   #
+   exec sleep 1
+}
+
+proc do_vfork_and_exec_tests {} {
+   global gdb_prompt
+
+   # Check that vfork catchpoints are supported, as an indicator for whether
+   # vfork-following is supported.
+   if [runto_main] then { check_vfork_catchpoints }
+
+   # Try following the parent process by stepping through a call to
+   # vfork.  Do this without catchpoints.
+   if [runto_main] then { vfork_parent_follow_through_step }
+
+   # Try following the parent process by setting a breakpoint on the
+   # other side of a vfork, and running to that point.  Do this
+   # without catchpoints.
+   if [runto_main] then { vfork_parent_follow_to_bp }
+
+   # Try following the child process by just continuing through the
+   # vfork, and letting the parent's breakpoint on "main" be auto-
+   # magically reset in the child.
+   #
+   if [runto_main] then { vfork_and_exec_child_follow_to_main_bp }
+
+   # Try following the child process by stepping through a call to
+   # vfork.  The child also executes an exec.  Since the child cannot
+   # be debugged until after it has exec'd, and since there's a bp on
+   # "main" in the parent, and since the bp's for the parent are
+   # recomputed in the exec'd child, the step through a vfork should
+   # land us in the "main" for the exec'd child, too.
+   #
+   if [runto_main] then { vfork_and_exec_child_follow_through_step }
+
+   # Try catching a vfork, and stepping out to the parent.
+   #
+   if [runto_main] then { tcatch_vfork_then_parent_follow }
+
+   # Try catching a vfork, and stepping out to the child.
+   #
+   if [runto_main] then { tcatch_vfork_then_child_follow }
+
+   # Test the ability to follow both child and parent of a vfork.  Do
+   # this without catchpoints.
+   # ??rehrauer: NYI.  Will add testpoints here when implemented.
+   #
+
+   # Test the ability to have the debugger ask the user at vfork-time
+   # whether to follow the parent, child or both.  Do this without
+   # catchpoints.
+   # ??rehrauer: NYI.  Will add testpoints here when implemented.
+   #
+}
+
+# Start with a fresh gdb
+
+
+gdb_test "'$GDB_TOOL_DIR'gdb $binfile" "$gdb_prompt"
+# The "Detaching..." and "Attaching..." messages may be hidden by
+# default.
+gdb_test_no_output "set verbose"
+
+# This is a test of gdb's ability to follow the parent or child
+# of a Unix vfork() system call.  (The child will subsequently
+# call a variant of a Unix exec() system call.)
+#
+do_vfork_and_exec_tests
+
+#set timeout $oldtimeout
+exit $GRET
+
+interact

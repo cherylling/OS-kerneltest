@@ -1,0 +1,366 @@
+#!/usr/bin/expect -f 
+# Copyright (C) 1996-1997, 2002-2003, 2007-2012 Free Software
+# Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# This file was written by Daniel Jacobowitz <drow@mvista.com>
+# (parts based on pthreads.exp by Fred Fish (fnf@cygnus.com).
+#
+# This test covers the various forms of "set scheduler-locking".
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+    -re "$target_prompt*" {}
+timeout {
+        send_user "\n*****error: ssh root@$target_ip failed*****\n"
+        set GRET [expr $GRET + 1]
+        exit 1
+    }
+}
+
+gdb_test "cd /tmp/for_gdbshell_test/threads" "$target_prompt*"
+
+
+set testfile "schedlock"
+set srcfile ${testfile}.c
+set binfile ${testfile}
+
+# The number of threads, including the main thread.
+set NUM 2
+
+#if {[gdb_compile_pthreads "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable [list debug "incdir=${objdir}"]] != "" } {
+#    return -1
+#}
+
+# Now we can proceed with the real testing.
+
+proc get_args { } {
+    global list_count
+    global GDBPROMPT
+    global NUM
+
+    set pattern "(\[0-9\]+)"
+    for {set i 1} {[expr $i < $NUM]} {incr i} {
+	append pattern ", (\[0-9\]+)"
+    }
+
+    send "print args\n" 
+    expect {
+	-re "\\\$\[0-9\]+ = {$pattern}.*$GDBPROMPT" {
+	    set list_count [expr $list_count + 1]
+#	    pass "listed args ($list_count)"
+
+	    set result ""
+	    for {set i 1} {[expr $i <= $NUM]} {incr i} {
+		lappend result $expect_out($i,string)
+	    }
+	    return $result
+	}
+    }
+}
+
+proc stop_process { description } {
+  global GDBPROMPT
+  global GRET
+
+  # For this to work we must be sure to consume the "Continuing."
+  # message first, or GDB's signal handler may not be in place.
+  after 1000 {send_gdb "\003"}
+  gdb_expect {
+    -re "Program received signal SIGINT.*$GDBPROMPT"
+      {
+#	pass $description
+      }
+    timeout
+      {
+	send_user "********* $description (timeout) ***************"
+     set GRET [expr $GRET + 1]
+      }
+  }
+}
+
+proc get_current_thread { description } {
+    global GDBPROMPT
+
+    send "bt\n"
+    expect {
+	-re "thread_function \\(arg=0x(\[0-9\])\\).*$GDBPROMPT" {
+#	    pass $description
+	    return $expect_out(1,string)
+	}
+    }
+    return ""
+}
+
+proc my_continue { msg } {
+    global GDBPROMPT
+    send "continue\n"
+    expect {
+	-re "Continuing" {
+#	    pass "continue ($msg)"
+	}
+    }
+
+    stop_process "stop all threads ($msg)"
+
+    # Make sure we're in one of the non-main looping threads.
+#    gdb_breakpoint [concat [gdb_get_line_number "schedlock.c: main loop"] " if arg != 0"]
+    sleep 2
+    gdb_test "b 58" "$GDBPROMPT"
+    gdb_test "c " "$GDBPROMPT"
+#    gdb_continue_to_breakpoint "return to loop ($msg)"
+    delete_breakpoints
+}
+
+proc step_ten_loops { msg } {
+    global GDBPROMPT
+    global GRET
+    for {set i 0} {[expr $i < 10]} {set i [expr $i + 1]} {
+	set other_step 0
+	send "step\n" 
+    expect {
+	    -re "myp\\) \\+\\+;.*$GDBPROMPT" {
+#		pass "step to increment ($msg $i)"
+	    }
+	    -re ".*$GDBPROMPT" {
+#		if {$other_step == 0} {
+		    set other_step 1
+		    send "step\n"
+		    exp_continue
+#		} else {
+#		    send_user "********* fail step to increment ($msg $i) ***********"
+#            set GRET [expr $GRET + 1]
+		    # FIXME cascade?
+#		}
+	    }
+	}
+    }
+}
+
+# Start with a fresh gdb.
+
+#gdb_exit
+#gdb_start
+#gdb_reinitialize_dir $srcdir/$subdir
+
+# We'll need this when we send_gdb a ^C to GDB.  Need to do it before we
+# run the program and gdb starts saving and restoring tty states.
+# On Ultrix, we don't need it and it is really slow (because shell_escape
+# doesn't use vfork).
+#if ![istarget "*-*-ultrix*"] then {
+#    gdb_test "shell stty intr '^C'" ".*"
+#}
+
+#gdb_load ${binfile}
+gdb_test "'$GDB_TOOL_DIR'gdbshell $binfile" "$GDBPROMPT"
+
+gdb_test_no_output "set print sevenbit-strings"
+gdb_test_no_output "set width 0"
+
+runto_main
+
+# See if scheduler locking is available on this target.
+send "set scheduler-locking off\n"
+expect {
+    -re "Target .* cannot support this command" {
+	send_user "********** target does not support scheduler locking **********"
+    set GRET [expr $GRET + 1]
+    }
+    -re "$GDBPROMPT" {
+#	pass "scheduler locking set to none"
+    }
+    timeout {
+    send_user " ******* target does not support scheduler locking (timeout) *******"
+    set GRET [expr $GRET + 1]
+#	return
+    }
+}
+
+#gdb_breakpoint [gdb_get_line_number "schedlock.exp: last thread start"]
+gdb_test "b 44" "$gdb_prompt"
+gdb_test "c" "$gdb_prompt"
+#gdb_continue_to_breakpoint "all threads started"
+
+global list_count
+set list_count 0
+
+set start_args [get_args]
+
+
+# First make sure that all threads are alive.
+my_continue "initial"
+
+set cont_args [get_args]
+
+set bad 0
+for {set i 0} {[expr $i < $NUM]} {set i [expr $i + 1]} {
+  if {[lindex $start_args $i] == [lindex $cont_args $i]} {
+    incr bad
+  }
+}
+if { $bad == 0 } {
+  send_user "pass all threads alive"
+} else {
+  send_user "****** fail all threads alive ($bad/$NUM did not run) ***********"
+  set GRET [expr $GRET + 1]
+}
+
+# We can't change threads, unfortunately, in current GDB.  Use
+# whichever we stopped in.
+set curthread [get_current_thread "find current thread (1)"]
+
+# Test stepping without scheduler locking.
+gdb_test_no_output "set scheduler-locking off"
+
+step_ten_loops "unlocked"
+
+# Make sure we're still in the same thread.
+set newthread [get_current_thread "find current thread (2)"]
+if {$curthread == $newthread} {
+    send_user "pass step without lock does not change thread"
+} else {
+    send_user "******* fail step without lock does not change thread (switched to thread $newthread) ***********"
+    set GRET [expr $GRET + 1]
+}
+
+set start_args $cont_args
+set cont_args [get_args]
+# 487055457, 485804600
+# 487055462, 486305514
+set num_other_threads 0
+for {set i 0} {[expr $i < $NUM]} {set i [expr $i + 1]} {
+  if {[lindex $start_args $i] == [lindex $cont_args $i]} {
+    if {$i == $curthread} {
+      send_user "******** fail current thread stepped (didn't run) ********"
+      set GRET [expr $GRET + 1]
+    }
+  } else {
+    if {$i == $curthread} {
+	if {[lindex $start_args $i] == [expr [lindex $cont_args $i] - 10]} {
+#	    pass "current thread stepped"
+	} else {
+	    send_user "******** fail current thread stepped (wrong amount) ********"
+        set GRET [expr $GRET + 1]
+	}
+    } else {
+      set num_other_threads [expr $num_other_threads + 1]
+    }
+  }
+}
+if {$num_other_threads > 0} {
+#  pass "other threads ran - unlocked"
+} else {
+  send_user "******* fail other threads ran - unlocked **********"
+  set GRET [expr $GRET + 1]
+}
+
+# Test continue with scheduler locking
+gdb_test "set scheduler-locking on" ""
+
+my_continue "with lock"
+
+# Make sure we're still in the same thread.
+set newthread [get_current_thread "find current thread (3)"]
+if {$curthread == $newthread} {
+#   pass "continue with lock does not change thread"
+} else {
+    send_user "********* continue with lock does not change thread (switched to thread $newthread) **********"
+    set GRET [expr $GRET + 1]
+}
+
+set start_args $cont_args
+set cont_args [get_args]
+
+set num_other_threads 0
+for {set i 0} {[expr $i < $NUM]} {set i [expr $i + 1]} {
+  if {[lindex $start_args $i] == [lindex $cont_args $i]} {
+    if {$i == $curthread} {
+      send_user "*********** current thread ran (didn't run) **********"
+      set GRET [expr $GRET + 1]
+    }
+  } else {
+    if {$i == $curthread} {
+#      pass "current thread ran"
+    } else {
+      incr num_other_threads
+    }
+  }
+}
+if {$num_other_threads > 0} {
+  send_user "*********** other threads didn't run - locked *********"
+  set GRET [expr $GRET + 1]
+} else {
+#  pass "other threads didn't run - locked"
+}
+
+# Test stepping with scheduler locking
+step_ten_loops "locked"
+
+# Make sure we're still in the same thread.
+set newthread [get_current_thread "find current thread (2)"]
+if {$curthread == $newthread} {
+#    pass "step with lock does not change thread"
+} else {
+    send_user " ******** step with lock does not change thread (switched to thread $newthread) **********"
+    set GRET [expr $GRET + 1]
+}
+
+set start_args $cont_args
+set cont_args [get_args]
+
+set num_other_threads 0
+for {set i 0} {[expr $i < $NUM]} {set i [expr $i + 1]} {
+  if {[lindex $start_args $i] == [lindex $cont_args $i]} {
+    if {$i == $curthread} {
+      send_user "*********** current thread stepped locked (didn't run) ************"
+      set GRET [expr $GRET + 1]
+    }
+  } else {
+    if {$i == $curthread} {
+	if {[lindex $start_args $i] == [expr [lindex $cont_args $i] - 10]} {
+ #       pass "current thread stepped locked"
+	} else {
+	    send_user " *********** current thread stepped locked (wrong amount) *************"
+        set GRET [expr $GRET + 1]
+	}
+    } else {
+      incr num_other_threads
+    }
+  }
+}
+if {$num_other_threads > 0} {
+  send_user "********** other threads didn't run - step locked ***********"
+  set GRET [expr $GRET + 1]
+} else {
+#  pass "other threads didn't run - step locked"
+}
+
+exit $GRET
+
+interact

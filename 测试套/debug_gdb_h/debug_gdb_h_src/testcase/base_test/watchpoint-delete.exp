@@ -1,0 +1,76 @@
+#!/usr/bin/expect -f
+
+# Copyright 2010-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global target_ip
+global  target_prompt
+
+spawn ssh root@$target_ip
+expect {
+    -timeout 2
+	    -re "$target_prompt*" {}
+    timeout {
+		send_user "\n*****error: ssh root@$target_ip failed*****\n"
+		exit 1
+    }
+}
+
+set target_prompt "/tmp/for_gdb_test/base_test"
+gdb_test "cd /tmp/for_gdb_test/base_test" "$target_prompt"
+
+set testfile watchpoint-delete
+set srcfile ${testfile}.c
+#set binfile ${objdir}/${subdir}/${testfile}
+
+#if { [prepare_for_testing ${testfile}.exp ${testfile} ${srcfile}] } {
+#    untested ${testfile}.exp
+#    return -1
+#}
+
+gdb_test "'$GDB_TOOL_DIR'gdb $testfile" "$GDBPROMPT*" ""
+
+# It is more compatible this way.
+#gdb_test "set can-use-hw-watchpoints 0" "" ""
+
+if ![runto_main] {
+    return -1
+}
+
+# Ensure there is a parent frame to create related bp_watchpoint_scope.
+gdb_breakpoint [gdb_get_line_number "break-here"]
+#gdb_continue_to_breakpoint "break-here" ".* break-here .*"
+#gdb_test_no_output "c"
+if [gdb_test "c" "$GDBPROMPT*" ""] {
+}
+
+#gdb_test "watch x" "atchpoint *" 
+if [gdb_test "watch x" "watchpoint*"] {
+}
+
+#gdb_test_no_output "delete"
+#gdb_test "delete" "$GDBPROMPT*" 
+delete_breakpoints
+
+exit $GRET
+interact

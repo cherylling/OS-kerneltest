@@ -1,0 +1,241 @@
+#!/usr/bin/expect -f
+# Copyright 1994-2000, 2007-2012 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+source ../lib/gdb_proc.exp
+global target_dir
+global GRET;
+set GRET 0;
+global ARGC;
+global GDB_TOOL_DIR
+set ARGC $argc
+global GDBPROMPT
+global gdb_prompt
+global target_ip
+global target_prompt
+global inferior_exited_re
+global test_username test_password  target_passwd
+global GDBSERVER_TOOL_DIR HOST_GDB_TOOL host_ip host_prompt host_passwd FLAG HOST_SDK_LIB_DIR 
+
+spawn su $test_username
+expect {
+    -timeout 2
+    -re "Password:" {
+        send "$test_password\n"
+        gdb_test "whoami" "$test_username"
+    }
+    timeout {
+        gdb_test "whoami" "$test_username"
+        if { $GRET != 0 } {
+        send_user "timeout su"
+        }
+    }
+}
+
+if { $GRET != 0 } {
+    send_user "su $test_username fail "
+    exit $GRET
+}
+
+ssh_on_to_target
+sleep 3 
+
+ if { $GRET } {
+    send_user "ssh on to $target_ip fail"
+    exit $GRET
+ }
+
+set target_prompt "/tmp/for_gdbserver_test/gdbserver.base"
+gdb_test "cd $target_prompt" "$target_prompt"
+gdb_test "export LD_LIBRARY_PATH=$target_prompt" "$target_prompt"
+
+set testfile interrupt
+set srcfile ${testfile}.c
+gdb_test "'$GDBSERVER_TOOL_DIR'gdbserver $host_ip:1111 $testfile &" "$gdb_prompt"
+gdb_test "exit"  "$host_prompt"
+sleep 3
+
+#gdb_test "export LD_LIBRARY_PATH=$HOST_SDK_LIB_DIR:."  "$host_prompt"
+gdb_test "$HOST_GDB_TOOL $testfile" "$gdb_prompt"
+gdb_test "target remote $target_ip:1111" "Remote debugging using $target_ip:1111.*$gdb_prompt"
+
+gdb_test "set solib-search-path $HOST_SDK_LIB_DIR:." "$gdb_prompt"
+
+#set options { debug }
+#if { ! [target_info exists gdb,nosignals] } {
+#    lappend options "additional_flags=-DSIGNALS"
+#}
+
+#if  { [gdb_compile "${srcdir}/${subdir}/${srcfile}" "${binfile}" executable $options] != "" } {
+#     untested interrupt.exp
+#     return -1
+#}
+#
+#gdb_start
+
+
+#if ![file exists $binfile] then {
+#    perror "$binfile does not exist."
+#    return 0
+#} else {
+#    gdb_reinitialize_dir $srcdir/$subdir
+#    gdb_load $binfile
+    # Hope this is unix :-)
+    gdb_test "shell stty intr '^C'" ".*" \
+	"set interrupt character in interrupt.exp"
+#    if [runto_main] then {
+    gdb_test "b main" ""
+	send "continue\n"
+	expect {
+	    -re ".*talk to me baby.*" {
+		pass "child process is alive"
+	    }
+	    timeout { fail "run (timeout)" }
+	}
+	# This should appear twice, once for the echo and once for the
+	# program's output.  Under dejagnu (but not interactively) for
+	# SunOS4, it only appears once.  Don't worry about it, I imagine
+	# dejagnu has just done something to the tty modes.
+	send "a\n"
+	expect {
+	    -re "a.*" {
+		pass "child process ate our char"
+	    }
+	    timeout { fail "echo a (timeout)" }
+	}
+	# Wait until the program is in the read system call again.
+	sleep 2
+
+	# Cntrl-c may fail for simulator targets running on a BSD host.
+	# This is the result of a combination of the read syscall
+	# being restarted and gdb capturing the cntrl-c signal.
+
+	# Cntrl-c may fail for simulator targets on slow hosts.
+	# This is because there is a race condition between entering
+	# the read and delivering the cntrl-c.
+
+	send "\003"
+	expect {
+	    -re "Program received signal SIGINT.*$gdb_prompt" {
+		pass "send_gdb control C"
+	    }
+	    timeout { fail "send_gdb control C (timeout)" }
+	}
+
+	send "p func1 ()\n"
+	expect {
+	    -re " = 4.*$gdb_prompt$" { pass "call function when asleep" }
+	    -re ".*Program received signal SIG(SEGV|ILL).*$gdb_prompt" {
+	#	setup_xfail "i*86-pc-linux*-gnu*"
+		fail "child died when we called func1, skipped rest of tests"
+		return
+	    }
+	    default {
+
+		# This fail probably happens whenever we use /proc (we
+		# don't use PRSABORT), but apparently also happens on
+		# other machines as well.
+
+#		setup_xfail "sparc*-*-solaris2*"
+#		setup_xfail "mips-*-ultrix*"
+#		setup_xfail "i*86-*-solaris2*"
+#		setup_xfail "*-*-sysv4*"
+#		setup_xfail "vax-*-*"
+#		setup_xfail "alpha-*-*"
+#		setup_xfail "*-*-*bsd*"
+#		setup_xfail "*-*-irix*"
+#		setup_xfail "*-*-hpux*"
+#		setup_xfail "*-*-*lynx*"
+		fail "call function when asleep (stays asleep)"
+		# Send_Gdb a newline to wake it up
+		send "\n"
+		gdb_test "" " = 4" "call function after waking it"
+	    }
+#	    eof { fail "call function when asleep (eof)" }
+	}
+
+	# Now try calling the function again.
+	gdb_test "p func1 ()" " = 4" "call function a second time"
+
+	# And the program should still be doing the same thing.
+	# The optional trailing \r\n is in case we sent a newline above
+	# to wake the program, in which case the program now sends it
+	# back.  We check for it either here or in the next gdb_expect
+	# command, because which one it ends up in is timing dependent.
+	send "continue\n"
+	# For some reason, i386-*-sysv4 gdb fails to issue the Continuing
+	# message, but otherwise appears normal (FIXME).
+	expect {
+	    -re "^continue.*Continuing.*" { pass "continue" }
+	    -re "^continue.*" { fail "continue (missing Continuing.)" }
+	    timeout { fail "continue (timeout)" }
+	}
+
+	send "data\n"
+	# The optional leading \r\n is in case we sent a newline above
+	# to wake the program, in which case the program now sends it
+	# back.
+        # FIXME: The pattern below leads to an expected success on HPUX-11.0
+        # but the success is spurious. Need to provide the right reg.expr.
+        # here.
+	expect {
+	    -re "^(.*|)data.*(|data.*)" { pass "echo data" }
+	    -re "Undefined command.*$gdb_prompt " { fail "echo data" }
+	    timeout { fail "echo data (timeout)" }
+	}
+
+ 	#if { ! [target_info exists gdb,nosignals] } {
+	    # Wait until the program is in the read system call again.
+	    sleep 2
+
+	    # Stop the program for another test.
+	    set msg "Send Control-C, second time"
+	    send "\003"
+	    expect {
+		-re "Program received signal SIGINT.*$gdb_prompt" {
+		    pass "$msg"
+		}
+        timeout {
+            fail "timeout 003"
+        }
+	    }
+
+	    # The "signal" command should deliver the correct signal and
+	    # return to the loop.
+	    set msg "signal SIGINT"
+	    gdb_test "signal SIGINT"  "^signal SIGINT.*Continuing with signal SIGINT.*" 
+
+	    # We should be back in the loop.
+	    send "more data\n"
+	    expect {
+		-re "^(\r\n|)more data.*(|more data.*)" { pass "echo more data" }
+		timeout { fail "echo more data (timeout)" }
+	    }
+	}
+
+	send "\004"
+	expect {
+	    -re "end of file.*$inferior_exited_re normally.*$gdb_prompt" {
+		pass "send end of file"
+	    }
+	    timeout { fail "send end of file (timeout)" }
+	}
+    }
+#}
+
+gdb_exit
+exit $GRET
+
+interact
